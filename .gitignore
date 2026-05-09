@@ -1,0 +1,60 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (recreate with pip install -r requirements.txt)
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging / setuptools
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# --- PyInstaller / build outputs ---
+build/
+dist/
+*.manifest
+
+# --- Testing / tools ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Vendored pygame full source tree (use: pip install pygame) ---
+pygame-2.6.1/
+
+# --- Jupyter (if any) ---
+.ipynb_checkpoints/
+
+# Optional: uncomment if you keep SQLite files under the repo and do not want them tracked
+# *.db
+
+# Optional: uncomment to exclude large CSV test logs from Git (does not affect app build)
+# 测试记录/
