@@ -22,7 +22,7 @@ station_sn_code = {
     # --- WEIGH-106-END ---
 
     #[FX_TODO]
-    "50":"NODEFINE"
+    "50":"HNXJCTQGNCS"
 }
 
 # 海能mes系统，用户码，工站码
@@ -44,7 +44,7 @@ station_report_code = {
     # --- WEIGH-106-END ---
 
     #[FX_TODO]
-    "50":"NODEFINE"
+    "50":"HNXJCTQGNCS"
 }
 
 
