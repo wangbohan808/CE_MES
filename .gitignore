@@ -58,3 +58,9 @@ pygame-2.6.1/
 
 # Optional: uncomment to exclude large CSV test logs from Git (does not affect app build)
 # 测试记录/
+
+main.exe
+测试记录/
+pygame-2.6.1/
+main.spec
+WEIGH_STATION_106_SPEC.md
