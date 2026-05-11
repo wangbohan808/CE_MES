@@ -42,3 +42,5 @@ project_name: "HW1"
 # weight_max_kg: 150
 # weight_read_delay_sec: 1
 # weight_read_timeout_sec: 2
+# weigh_scheme: "1"   # "1" 全程固定限；"2" 前 weigh_pass_first_n 台直通后仅 μ±σ（历史文件 weigh_106_history.json）
+# weigh_pass_first_n: 5

@@ -65,6 +65,8 @@ class LoadCfg:
     weight_max_kg: float = 150.0
     weight_read_delay_sec: float = 1.0
     weight_read_timeout_sec: float = 2.0
+    weigh_scheme: str = "1"  # "1" 固定限；"2" 前 weigh_pass_first_n 台直通后 μ±σ
+    weigh_pass_first_n: int = 5
     # --- WEIGH-106-END ---
 
 
@@ -199,8 +201,15 @@ def test_init_work():
             sqlite_db.db_error_state = str(sq_res[1])
         wx.CallAfter(MainFrame.main_frame.up_notification_ui_item_size, num=3, size=42)
     elif int(load_cfg.dev) == 106:  # [WEIGH-106] 称重工位 idle 提示
-        rng = "当前合格区间 {:.1f} ~ {:.1f} kg。".format(
-            load_cfg.weight_min_kg, load_cfg.weight_max_kg)
+        wlo = load_cfg.weight_min_kg
+        whi = load_cfg.weight_max_kg
+        if str(getattr(load_cfg, "weigh_scheme", "1")).strip() == "2":
+            rng = (
+                "方案二：前 {} 台直通；之后合格判据为 μ±σ（总体标准差）；"
+                "直通段 MES 上下限仍为 {:.1f} ~ {:.1f} kg；历史文件 weigh_106_history.json。"
+            ).format(int(getattr(load_cfg, "weigh_pass_first_n", 5)), wlo, whi)
+        else:
+            rng = "方案一：当前合格区间 {:.1f} ~ {:.1f} kg。".format(wlo, whi)
         wx.CallAfter(
             MainFrame.main_frame.up_notification_ui,
             first="称重工位：货物先放稳再上秤，再扫 SN。",
@@ -342,6 +351,14 @@ def load_config():
         config.get("weight_read_delay_sec", load_cfg.weight_read_delay_sec))
     load_cfg.weight_read_timeout_sec = float(
         config.get("weight_read_timeout_sec", load_cfg.weight_read_timeout_sec))
+    load_cfg.weigh_scheme = str(
+        config.get("weigh_scheme", getattr(load_cfg, "weigh_scheme", "1"))
+    ).strip() or "1"
+    load_cfg.weigh_pass_first_n = int(
+        config.get("weigh_pass_first_n", getattr(load_cfg, "weigh_pass_first_n", 5))
+    )
+    if load_cfg.weigh_pass_first_n < 0:
+        load_cfg.weigh_pass_first_n = 0
 
     if is_com_port(load_cfg.com) is False:
         print("配置串口端口非法：" + load_cfg.com)
