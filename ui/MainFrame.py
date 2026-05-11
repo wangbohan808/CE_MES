@@ -130,7 +130,7 @@ heading_line_dict = {
     "106": "称重工位",  # [WEIGH-106] device_type=106，与 WEIGH_STATION_106_SPEC / weigh_station 对照
 
     #[FX_TODO]
-    "50":"双红外成品检测"
+    "050":"双红外成品检测"
 }
 
 
