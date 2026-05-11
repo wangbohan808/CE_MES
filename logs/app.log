@@ -4029,3 +4029,7 @@ Ver2.0.1
 2026-05-08 19:41:13,029 - test_serial.py - 36 - INFO - tx: 0x52 0xd 0xa 
 2026-05-09 11:27:55,833 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能
 2026-05-09 14:47:13,121 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能
+2026-05-11 14:51:54,746 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能
+2026-05-11 15:11:19,124 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能
+2026-05-11 15:19:12,017 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能
+2026-05-11 15:24:24,068 - MainFrame.py - 429 - INFO - UI运行OK，启动日志功能

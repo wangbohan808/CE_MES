@@ -357,8 +357,8 @@ def load_config():
     load_cfg.weigh_pass_first_n = int(
         config.get("weigh_pass_first_n", getattr(load_cfg, "weigh_pass_first_n", 5))
     )
-    if load_cfg.weigh_pass_first_n < 0:
-        load_cfg.weigh_pass_first_n = 0
+    if load_cfg.weigh_pass_first_n < 3:
+        load_cfg.weigh_pass_first_n = 3
 
     if is_com_port(load_cfg.com) is False:
         print("配置串口端口非法：" + load_cfg.com)

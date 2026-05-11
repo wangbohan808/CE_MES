@@ -51,7 +51,7 @@ def test_process():
     sn = sn_list[0]
     encode_res = encode_rules.match_sn_encoding_rules(dev=test.load_cfg.dev, sn=sn)
     if encode_res is not True:
-        wx.CallAfter(MainFrame.main_frame.up_notification_ui, sencod="SN编码异常 NG：" + sn, color=wx.RED)
+        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="SN编码异常 NG：" + sn, color=wx.RED)
         test.test_work_state = "idle"
         return
 
