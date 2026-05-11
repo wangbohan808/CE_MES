@@ -67,6 +67,8 @@ class LoadCfg:
     weight_read_timeout_sec: float = 2.0
     weigh_scheme: str = "1"  # "1" 固定限；"2" 前 weigh_pass_first_n 台直通后 μ±σ
     weigh_pass_first_n: int = 5
+    # 方案二历史重量 JSON；相对路径相对 exe 目录（frozen）或当前工作目录
+    weigh_history_json_path: str = "weigh_106_history.json"
     # --- WEIGH-106-END ---
 
 
@@ -206,8 +208,13 @@ def test_init_work():
         if str(getattr(load_cfg, "weigh_scheme", "1")).strip() == "2":
             rng = (
                 "方案二：前 {} 台直通；之后合格判据为 μ±σ（总体标准差）；"
-                "直通段 MES 上下限仍为 {:.1f} ~ {:.1f} kg；历史文件 weigh_106_history.json。"
-            ).format(int(getattr(load_cfg, "weigh_pass_first_n", 5)), wlo, whi)
+                "直通段 MES 上下限仍为 {:.1f} ~ {:.1f} kg；历史文件 {}（config.yaml：weigh_history_json_path）。"
+            ).format(
+                int(getattr(load_cfg, "weigh_pass_first_n", 5)),
+                wlo,
+                whi,
+                str(getattr(load_cfg, "weigh_history_json_path", "weigh_106_history.json")),
+            )
         else:
             rng = "方案一：当前合格区间 {:.1f} ~ {:.1f} kg。".format(wlo, whi)
         wx.CallAfter(
@@ -359,6 +366,13 @@ def load_config():
     )
     if load_cfg.weigh_pass_first_n < 3:
         load_cfg.weigh_pass_first_n = 3
+    _whp = str(
+        config.get(
+            "weigh_history_json_path",
+            getattr(load_cfg, "weigh_history_json_path", "weigh_106_history.json"),
+        )
+    ).strip()
+    load_cfg.weigh_history_json_path = _whp or "weigh_106_history.json"
 
     if is_com_port(load_cfg.com) is False:
         print("配置串口端口非法：" + load_cfg.com)

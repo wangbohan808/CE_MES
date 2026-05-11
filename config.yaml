@@ -27,7 +27,7 @@
 # test_tool: 指测试工具名称和编码(自定义)
 
 mcu_version: 002.001.002
-device_type: "106"
+device_type: "017"
 
 use_mes: "2"
 # 指定串口，当字符为空(user_com: "")，自动获取当前串口（需唯一）  COMx
@@ -41,6 +41,8 @@ project_name: "HW1"
 # weight_min_kg: 100
 # weight_max_kg: 150
 weight_read_delay_sec: 1
-weight_read_timeout_sec: 2
-weigh_scheme: "2"   # "1" 全程固定限；"2" 前 weigh_pass_first_n 台直通后仅 μ±σ（历史文件 weigh_106_history.json）
+weight_read_timeout_sec: 20
+weigh_scheme: "2"   # "1" 全程固定限；"2" 前 weigh_pass_first_n 台直通后仅 μ±σ
 weigh_pass_first_n: 5
+# 方案二历史重量 JSON：绝对路径或相对 exe/工作目录；不存在则自动创建 {"weights":[]}；损坏/读失败仍按空历史
+weigh_history_json_path: "weigh_106_history_test.json"

@@ -4,7 +4,7 @@ import os
 import sys
 from typing import List, Optional, Tuple
 
-HISTORY_FILENAME = "weigh_106_history.json"
+_DEFAULT_HISTORY_REL = "weigh_106_history.json"
 
 
 def _base_dir() -> str:
@@ -14,11 +14,34 @@ def _base_dir() -> str:
 
 
 def history_file_path() -> str:
-    return os.path.join(_base_dir(), HISTORY_FILENAME)
+    """方案二历史文件绝对路径：来自 config.yaml weigh_history_json_path（相对则相对 _base_dir）。"""
+    from test_tool import test as _test
+
+    raw = str(getattr(_test.load_cfg, "weigh_history_json_path", "") or "").strip()
+    if not raw:
+        raw = _DEFAULT_HISTORY_REL
+    if os.path.isabs(raw):
+        return os.path.normpath(raw)
+    return os.path.normpath(os.path.join(_base_dir(), raw))
+
+
+def _ensure_empty_history_file(path: str) -> None:
+    """文件不存在时创建默认 {"weights":[]}；已存在则不改动。"""
+    if os.path.exists(path):
+        return
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"weights": []}, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 def load_history_weights() -> List[float]:
     path = history_file_path()
+    _ensure_empty_history_file(path)
     if not os.path.exists(path):
         return []
     try:
@@ -40,11 +63,23 @@ def load_history_weights() -> List[float]:
 
 def save_history_weights(weights: List[float]) -> None:
     path = history_file_path()
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            pass
+    tmp_path = path + ".tmp"
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump({"weights": weights}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
     except OSError:
-        pass
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 def window_slice_bounds(t: int, history_len: int) -> Tuple[int, int]:
