@@ -27,7 +27,7 @@
 # test_tool: 指测试工具名称和编码(自定义)
 
 mcu_version: 002.001.002
-device_type: "017"
+device_type: "050"
 
 use_mes: "2"
 # 指定串口，当字符为空(user_com: "")，自动获取当前串口（需唯一）  COMx
