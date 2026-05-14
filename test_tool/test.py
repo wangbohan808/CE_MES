@@ -70,6 +70,19 @@ class LoadCfg:
     # 方案二历史重量 JSON；相对路径相对 exe 目录（frozen）或当前工作目录
     weigh_history_json_path: str = "weigh_106_history.json"
     # --- WEIGH-106-END ---
+    # #[RV30-PROTO] 基站 device_type=50 实时判据（config.yaml，与 doc/ce_mes_iteration/RV30_BASESTATION_PROTOCOL_AND_IMPLEMENTATION_SPEC.md 一致）
+    rv30_charge_min: int = 0
+    rv30_charge_max: int = 0
+    rv30_suction_pa_min: int = 0
+    rv30_suction_pa_max: int = 0
+    rv30_freq_min: int = 0
+    rv30_freq_max: int = 0
+    rv30_ir_l: int = 0
+    rv30_ir_lc: int = 0
+    rv30_ir_rc: int = 0
+    rv30_ir_r: int = 0
+    rv30_dust_bag_expected: int = 0
+    rv30_led_expected: int = 0
 
 
 @dataclass
@@ -90,6 +103,17 @@ class DustThreshold:
 
 dust_th = DustThreshold()
 load_cfg = LoadCfg()
+
+# #[RV30-PROTO] RV30 基站(device_type=50) 会话状态机常量（调优时只改 hw1_bastation_finished_product_mode_FX 与下列变量）
+RV30_SESS_IDLE = 0
+RV30_SESS_WAIT_SN = 1
+RV30_SESS_RUNNING = 2
+RV30_SESS_FINISHED = 3
+RV30_SESS_ABORTED = 4
+rv30_session_state = RV30_SESS_IDLE
+rv30_last_step = -1
+rv30_89_mes_done = False
+rv30_realtime_ng = False
 
 
 # import sys
@@ -239,11 +263,43 @@ def test_idle_work():
 def barcode_check_process():
     global check_sn_enable
     global check_sn_str
+    global rv30_session_state
+    global rv30_last_step
+    global rv30_89_mes_done
+    global rv30_realtime_ng
 
     if check_sn_enable and (barcode_q.empty() is not True):
         sn = barcode_q.get()
         str_list = [int(byte) for byte in sn.encode('utf-8')]
         if int(load_cfg.dev) == 5:  # 地检
+            return
+        elif int(load_cfg.dev) == 50:  # #[RV30-PROTO] 基站050：门闸失败先发 0x58 再发 0x89 0x03 并立即 MES NG，不等 0x88
+            print("check sn: " + sn)
+            encode_res = encode_rules.match_sn_encoding_rules(dev=load_cfg.dev, sn=str(sn))
+            _txd = rv30_proto_tx_dev_byte()
+            if encode_res is not True:
+                wx.CallAfter(MainFrame.main_frame.up_notification_ui,
+                             second="SN码异常，请检测：" + str(sn),
+                             color=wx.RED)
+                ser_send_data(dev=_txd, cmd=0x58, data=str_list)
+                ser_send_data(dev=_txd, cmd=0x89, data=[0x03])
+                check_sn_str = sn
+                rv30_proto_abort_mes_after_gate_fail()
+                check_sn_enable = False
+                return
+            res = mes_run.check_sn_is_ok(sn)
+            check_sn_str = sn
+            if res:
+                ser_send_data(dev=_txd, cmd=0x57, data=str_list)
+                rv30_session_state = RV30_SESS_RUNNING
+                rv30_last_step = -1
+                rv30_89_mes_done = False
+                rv30_realtime_ng = False
+            else:
+                ser_send_data(dev=_txd, cmd=0x58, data=str_list)
+                ser_send_data(dev=_txd, cmd=0x89, data=[0x03])
+                rv30_proto_abort_mes_after_gate_fail()
+            check_sn_enable = False
             return
         elif 0 < int(load_cfg.dev) < 100:
 
@@ -373,6 +429,24 @@ def load_config():
         )
     ).strip()
     load_cfg.weigh_history_json_path = _whp or "weigh_106_history.json"
+
+    # #[RV30-PROTO] 从 config.yaml 读取 RV30 判据（缺省 0 表示不启用该项比较）
+    load_cfg.rv30_charge_min = int(config.get("rv30_charge_min", getattr(load_cfg, "rv30_charge_min", 0)))
+    load_cfg.rv30_charge_max = int(config.get("rv30_charge_max", getattr(load_cfg, "rv30_charge_max", 0)))
+    load_cfg.rv30_suction_pa_min = int(
+        config.get("rv30_suction_pa_min", getattr(load_cfg, "rv30_suction_pa_min", 0)))
+    load_cfg.rv30_suction_pa_max = int(
+        config.get("rv30_suction_pa_max", getattr(load_cfg, "rv30_suction_pa_max", 0)))
+    load_cfg.rv30_freq_min = int(config.get("rv30_freq_min", getattr(load_cfg, "rv30_freq_min", 0)))
+    load_cfg.rv30_freq_max = int(config.get("rv30_freq_max", getattr(load_cfg, "rv30_freq_max", 0)))
+    load_cfg.rv30_ir_l = int(config.get("rv30_ir_l", getattr(load_cfg, "rv30_ir_l", 0)))
+    load_cfg.rv30_ir_lc = int(config.get("rv30_ir_lc", getattr(load_cfg, "rv30_ir_lc", 0)))
+    load_cfg.rv30_ir_rc = int(config.get("rv30_ir_rc", getattr(load_cfg, "rv30_ir_rc", 0)))
+    load_cfg.rv30_ir_r = int(config.get("rv30_ir_r", getattr(load_cfg, "rv30_ir_r", 0)))
+    load_cfg.rv30_dust_bag_expected = int(
+        config.get("rv30_dust_bag_expected", getattr(load_cfg, "rv30_dust_bag_expected", 0)))
+    load_cfg.rv30_led_expected = int(
+        config.get("rv30_led_expected", getattr(load_cfg, "rv30_led_expected", 0)))
 
     if is_com_port(load_cfg.com) is False:
         print("配置串口端口非法：" + load_cfg.com)
@@ -525,7 +599,11 @@ def test_cmd_handle(dev, cmd, dat):
         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="治具数据异常",
                      color=wx.RED)
         return
-    if int(load_cfg.dev) != int(dev):
+    # #[RV30-PROTO] device_type=050 时治具常发设备字节 0x50(十进制80)，与 YAML 中 50 对齐
+    _dev_match = int(load_cfg.dev) == int(dev)
+    if int(load_cfg.dev) == 50 and int(dev) == 0x50:
+        _dev_match = True
+    if not _dev_match:
         print("配置设备类型：" + str(int(load_cfg.dev)) + " 上传的设备类型：" + str(int(dev)))
         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="治具类型不匹配", color=wx.RED)
     else:
@@ -550,7 +628,7 @@ def test_cmd_handle(dev, cmd, dat):
         elif int(dev) == 17:
            hw1_bastation_finished_product_mode(dev, cmd, dat)
         #[FX_TODO]
-        elif int(dev) == 50:
+        elif int(dev) == 50 or (int(load_cfg.dev) == 50 and int(dev) == 0x50):  # #[RV30-PROTO] 帧设备字节 50/0x50 均进 FX
            hw1_bastation_finished_product_mode_FX(dev, cmd, dat)
 
 
@@ -571,6 +649,180 @@ def ser_send_data(dev, cmd, data):
         print(hex(d), end=' ')
     print(" ")
     test_serial.test_serial_send(ser_dat)
+
+
+# #[RV30-PROTO] 以下为 RV30 基站(device_type=50) 专用辅助函数（调优入口：hw1_bastation_finished_product_mode_FX）
+def rv30_proto_reset_to_idle():
+    # #[RV30-PROTO] 一轮测试完全结束后恢复空闲，便于下一轮 0x66
+    global rv30_session_state, rv30_last_step, rv30_89_mes_done, rv30_realtime_ng
+    rv30_session_state = RV30_SESS_IDLE
+    rv30_last_step = -1
+    rv30_89_mes_done = False
+    rv30_realtime_ng = False
+
+
+def rv30_proto_tx_dev_byte():
+    # #[RV30-PROTO] 发往治具的「设备」字节：与治具上行帧一致；配置 050 时默认 0x50（十进制80），联调可改
+    if int(load_cfg.dev) == 50:
+        return 0x50
+    return int(load_cfg.dev)
+
+
+def rv30_proto_mes_ng_once(notify_second="MES已报NG"):
+    # #[RV30-PROTO] 发完 0x89 或门闸失败后立即上报 NG，防抖不重复 send_report
+    global test_end_time, rv30_89_mes_done, rv30_session_state
+    if rv30_89_mes_done:
+        return
+    rv30_89_mes_done = True
+    test_end_time = datetime.now()
+    rv30_session_state = RV30_SESS_ABORTED
+    mes_run.send_report(test_start_time, test_end_time, check_sn_str, "NG")
+    wx.CallAfter(MainFrame.main_frame.up_notification_ui, second=notify_second, color=wx.RED)
+
+
+def rv30_proto_abort_mes_after_gate_fail():
+    # #[RV30-PROTO] 门闸阶段已发 0x58+0x89，此处只做 MES NG 与状态收尾
+    rv30_proto_mes_ng_once(notify_second="门闸失败，MES已报NG")
+
+
+def rv30_proto_realtime_fail(dev, reason):
+    # #[RV30-PROTO] 实时阶段仅发 0x89 0x03，不等 0x88 即 MES NG
+    global rv30_realtime_ng
+    if rv30_89_mes_done:
+        return
+    rv30_realtime_ng = True
+    ser_send_data(dev, 0x89, data=[0x03])
+    mes_run.add_report(name="RV30实时判据", result="NG", value=str(reason))
+    rv30_proto_mes_ng_once(notify_second="实时判据失败：" + str(reason))
+
+
+def rv30_proto_parse_68_dat(dat):
+    # #[RV30-PROTO] 0x68 阈值数据区草稿（≥19 字节）：回充4+版本4+频率1+尘袋1+充电4+LED1+集尘4，详见规格 §8
+    if len(dat) < 19:
+        print("rv30 0x68 len short:", len(dat))
+        return
+    dust_th.cc_min = int(dat[10]) * 256 + int(dat[11])
+    dust_th.cc_max = int(dat[12]) * 256 + int(dat[13])
+    dust_th.ac_lv_max = int(dat[8])
+    dust_th.ac_lv_min = int(dat[8])
+    dust_th.barometer_min = int(dat[15]) * 256 + int(dat[16])
+    dust_th.barometer_max = int(dat[17]) * 256 + int(dat[18])
+    dust_th.out_barometer_max = dust_th.barometer_max
+    dust_th.out_barometer_min = dust_th.barometer_min
+
+
+def rv30_proto_parse_77_apply_globals(dat):
+    # #[RV30-PROTO] 0x77 数据区：步骤+回充左/左中/右中/右+版本4+频率+尘袋+充电+LED+集尘(×10Pa)；下标随通讯协议.png 联调修订
+    global charge_value, dev_ver, ver_res
+    global ir_code_left, ir_code_right, ir_code_guard
+    global dust_bug_install, dust_collection_suction
+    if len(dat) < 16:
+        return None
+    step = int(dat[0])
+    ir_code_left = int(dat[1])
+    ir_code_guard = int(dat[3])
+    ir_code_right = int(dat[4])
+    ir_lc = int(dat[2])
+    charge_value = int(dat[11]) << 8 | int(dat[12])
+    dust_bug_install = int(dat[10])
+    dust_collection_suction = (int(dat[14]) << 8 | int(dat[15])) * 10
+    dev_ver = ".".join(format(int(dat[i]), "03d") for i in range(5, 8))
+    if len(dat) > 8:
+        dev_ver += "." + format(int(dat[8]), "03d")
+    if dev_ver == load_cfg.mcu_ver:
+        ver_res = "OK"
+    else:
+        ver_res = "NG"
+    return {
+        "step": step,
+        "ir_l": ir_code_left,
+        "ir_lc": ir_lc,
+        "ir_rc": ir_code_guard,
+        "ir_r": ir_code_right,
+        "freq": int(dat[9]) if len(dat) > 9 else 0,
+        "dust": int(dat[10]) if len(dat) > 10 else 0,
+        "charge": charge_value,
+        "led": int(dat[13]) if len(dat) > 13 else 0,
+        "suction_pa": dust_collection_suction,
+    }
+
+
+def rv30_proto_yaml_realtime_ok(p):
+    # #[RV30-PROTO] 以 config.yaml 为主与 0x77 解析结果比对；返回 False 表示应走实时异常
+    if p is None:
+        return True
+    cmin, cmax = load_cfg.rv30_charge_min, load_cfg.rv30_charge_max
+    if cmin != 0 or cmax != 0:
+        lo, hi = (cmin, cmax) if cmin <= cmax else (cmax, cmin)
+        if not (lo <= p["charge"] <= hi):
+            return False
+    smin, smax = load_cfg.rv30_suction_pa_min, load_cfg.rv30_suction_pa_max
+    if smin != 0 or smax != 0:
+        slo, shi = (smin, smax) if smin <= smax else (smax, smin)
+        if not (slo <= p["suction_pa"] <= shi):
+            return False
+    fmin, fmax = load_cfg.rv30_freq_min, load_cfg.rv30_freq_max
+    if fmin != 0 or fmax != 0:
+        flo, fhi = (fmin, fmax) if fmin <= fmax else (fmax, fmin)
+        if not (flo <= p["freq"] <= fhi):
+            return False
+    if load_cfg.rv30_ir_l and p["ir_l"] != load_cfg.rv30_ir_l:
+        return False
+    if load_cfg.rv30_ir_lc and p["ir_lc"] != load_cfg.rv30_ir_lc:
+        return False
+    if load_cfg.rv30_ir_rc and p["ir_rc"] != load_cfg.rv30_ir_rc:
+        return False
+    if load_cfg.rv30_ir_r and p["ir_r"] != load_cfg.rv30_ir_r:
+        return False
+    if load_cfg.rv30_dust_bag_expected and p["dust"] != load_cfg.rv30_dust_bag_expected:
+        return False
+    if load_cfg.rv30_led_expected and p["led"] != load_cfg.rv30_led_expected:
+        return False
+    return True
+
+
+def rv30_proto_add_fx_reports():
+    # #[RV30-PROTO] 上报 MES 明细项（与旧 hw1 FX 列表对齐，便于调优对比历史）
+    mes_run.add_report(name="mcu软件版本", result=ver_res, value=dev_ver, val_max=load_cfg.mcu_ver, val_min=load_cfg.mcu_ver)
+    mes_run.add_report(name="充电电流", result="", value=str(charge_value))
+    mes_run.add_report(name="左回充码", result="", value=str(ir_code_left))
+    mes_run.add_report(name="右回充码", result="", value=str(ir_code_right))
+    mes_run.add_report(name="近卫回充码", result="", value=str(ir_code_guard))
+    mes_run.add_report(name="尘袋在位", result="", value=str(dust_bug_install))
+    mes_run.add_report(name="集尘吸力Pa", result="", value=str(dust_collection_suction))
+
+
+def rv30_proto_finalize_88(dev, dat):
+    # #[RV30-PROTO] 收到 0x88：与首字节 01/02/03 无严格 MES 映射；综合 ver_res、rv30_realtime_ng、约定正常结束=0x03
+    global test_end_time, rv30_session_state
+    test_end_time = datetime.now()
+    res_byte = dat[0] if len(dat) else 0xFF
+    if rv30_89_mes_done:
+        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="本轮已异常上报，收到治具结束帧", color=wx.RED)
+        rv30_session_state = RV30_SESS_FINISHED
+        clear_sn_save_list()
+        rv30_proto_reset_to_idle()
+        return
+    normal_end = res_byte == 0x03
+    mes_ok = normal_end and (not rv30_realtime_ng) and (ver_res == "OK")
+    rv30_proto_add_fx_reports()
+    if mes_ok:
+        mes_run.add_report(name="led", result="OK")
+        res_display_str = "测试完成(综合判定 PASS)"
+        text_color = wx.GREEN
+        mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "OK")
+        wx.CallAfter(MainFrame.main_frame.up_test_ui, name="led_display", result="pass")
+    else:
+        mes_run.add_report(name="led", result="NG")
+        res_display_str = "测试结束(综合判定 NG)"
+        text_color = wx.RED
+        mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "NG")
+        wx.CallAfter(MainFrame.main_frame.up_test_ui, name="led_display", result="fail")
+    if mes_ret:
+        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second=res_display_str, color=text_color)
+    rv30_session_state = RV30_SESS_FINISHED
+    clear_sn_save_list()
+    rv30_proto_reset_to_idle()
 
 
 # 静态电流测试
@@ -2477,255 +2729,81 @@ def hw1_bastation_finished_product_mode(dev, cmd, dat):
         clear_sn_save_list()
 
 
-#[FX_TODO]
+# #[RV30-PROTO] RV30 基站成品(device_type=50)：0x66 不发 0x67；门闸 0x57/0x58；0x77 无应答；异常 0x89 0x03；0x88 综合判定 MES
 def hw1_bastation_finished_product_mode_FX(dev, cmd, dat):
+    # #[RV30-PROTO] 调优入口：本函数 + rv30_proto_* + config.yaml rv30_* 键
     global test_start_time
     global test_end_time
     global check_sn_enable
     global ver_res
     global dev_ver
-    global charge_value 
-    global hot_air 
-    global ir_code_left 
-    global ir_code_right 
-    global ir_code_guard 
-    global clear_tank_install 
-    global duty_tank_install 
-    global dust_bug_install 
-    global clean_base_install 
-    global dust_collection_suction 
-    global clean_water_pump_current 
-    global duty_water_pump_current 
-    global cleaner_pump_current 
-    global electromagnetic_three_way_current 
-    global clean_base_liquid_level 
-    global turbidity_data 
+    global charge_value
+    global ir_code_left
+    global ir_code_right
+    global ir_code_guard
+    global dust_bug_install
+    global dust_collection_suction
+    global rv30_session_state
+    global rv30_last_step
+    global rv30_89_mes_done
+    global rv30_realtime_ng
     if len(dat) <= 0:
         print("len=0 无有效数据")
         return
 
-    if cmd == 0x66:  # 命令帧：夹具上传开始测试
-        ser_send_cmd(dev, 0x67)  # # 回复夹具开始测试
+    if cmd == 0x66:
+        # #[RV30-PROTO] 开始测试：禁止 ser_send_cmd(0x67)，仅等扫码后 0x57/0x58
         if dat[0] == 0x00:
             test_start_time = datetime.now()
-            mes_run.clear_report()  # 清除mes待上传记录
-            tool.clear_queue(barcode_q)  # 清空扫码枪数据
-            check_sn_enable = True  # 使能SN号过站检测
-            print('扫描枪扫描二维码')
+            mes_run.clear_report()
+            tool.clear_queue(barcode_q)
+            check_sn_enable = True
+            rv30_last_step = -1
+            rv30_89_mes_done = False
+            rv30_realtime_ng = False
+            rv30_session_state = RV30_SESS_WAIT_SN
+            print("RV30 扫描枪扫描二维码")
             wx.CallAfter(MainFrame.main_frame.reset_ui)
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请扫码")
         elif dat[0] == 0x01:
-            print('开始测试')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
         elif dat[0] == 0x02:
-            print('开始测试')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
         elif dat[0] == 0x52:
-            print('请拔出尘袋')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请拔出尘袋")
         elif dat[0] == 0x51:
-            print('请插入尘袋')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请插入尘袋")
         elif dat[0] == 0x05:
-            print('请观察灯效是否正常')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请观察灯效是否正常")
         else:
-            print('其他开始测试')
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="继续测试")
     elif cmd == 0x68:
-        print('所有阀值：' + str(dat))
-        # 阈值 充电电流
-        dust_th.cc_max = (int(dat[0]) * 256 + int(dat[1]))
-        dust_th.cc_min = (int(dat[2]) * 256 + int(dat[3]))
-        # 阈值 ac 过载频率
-        dust_th.ac_lv_max = int(dat[4])
-        dust_th.ac_lv_min = int(dat[5])
-        # 阈值 外接气压计 上线下线；吸力值
-        dust_th.out_barometer_max = (int(dat[6]) * 256 + int(dat[7]))
-        dust_th.out_barometer_min = (int(dat[8]) * 256 + int(dat[9]))
-        # 阈值 气压值小板 上线下线；检测尘满
-        dust_th.barometer_max = (int(dat[10]) * 256 + int(dat[11]))
-        dust_th.barometer_min = (int(dat[12]) * 256 + int(dat[13]))
-        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请扫码", color=wx.RED)
-    elif cmd == 0x77:  # 命令帧：红外收发和集尘宝版本号
-        print("基站成品测试过程数据:" + str(dat))
-        infrared_code = int(dat[0])
-        charge_value = int(dat[1])<<8|int(dat[2])
-        hot_air = int(dat[3])<<8|int(dat[4])
-        ir_code_left = int(dat[5])
-        ir_code_right = int(dat[6])
-        ir_code_guard = int(dat[7])
-        clear_tank_install = int(dat[8])
-        duty_tank_install = int(dat[9])
-        dust_bug_install = int(dat[10])
-        clean_base_install = int(dat[11])
-        dust_collection_suction = int(dat[18])<<8|int(dat[19])
-        clean_water_pump_current = int(dat[21])<<8|int(dat[21])
-        duty_water_pump_current =int(dat[23])<<8|int(dat[24])
-        cleaner_pump_current = int(dat[31])<<8|int(dat[32])
-        electromagnetic_three_way_current = int(dat[27])<<8|int(dat[28])
-        clean_base_liquid_level = int(dat[25])<<8|int(dat[26])
-        turbidity_data = int(dat[33])<<8|int(dat[34])
-
-        dev_ver = format(int(dat[1]), '03d') + '.'
-        dev_ver += (format(int(dat[2]), '03d') + '.' + format(int(dat[3]), '03d'))
+        # #[RV30-PROTO] 阈值上传：草稿解析写入 dust_th，长度与下标见规格 §8 / 通讯协议.png
+        print("RV30 阈值上传 len=" + str(len(dat)) + " dat=" + str(dat))
+        rv30_proto_parse_68_dat(dat)
+        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="已收到阈值上传", color=wx.RED)
+    elif cmd == 0x77:
+        # #[RV30-PROTO] 实时数据：不向治具回任何帧；与 config.yaml rv30_* 比对
+        print("RV30 实时数据:" + str(dat))
+        if rv30_session_state != RV30_SESS_RUNNING or rv30_89_mes_done:
+            return
+        p = rv30_proto_parse_77_apply_globals(dat)
         wx.CallAfter(MainFrame.main_frame.up_ver_ui, dev_ver)
-        if dev_ver == load_cfg.mcu_ver:
-            ver_res = "OK"
-        else:
-            ver_res = "NG"
-        res = ""
-        display_str = "pass"
-        if infrared_code == 1:
-            res = "OK"
-            display_str = "pass"
-        elif infrared_code == 2:
-            res = "NG"
-            display_str = "fail"
-        # 版本号异常，不进行后续测试
-        if res == "OK" and dev_ver != load_cfg.mcu_ver:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="测试失败：软件版本号不匹配", color=wx.RED)
-        # if clear_water_pressure > clear_water_pressure_max:
-        #    clear_water_pressure_max = clear_water_pressure
-        # if clear_water_pressure < clear_water_pressure_min:
-        #    clear_water_pressure_min = clear_water_pressure
-
-        # if duty_water_pressure > duty_water_pressure_max:
-        #    duty_water_pressure_max = duty_water_pressure
-        # if duty_water_pressure < duty_water_pressure_min:
-        #    duty_water_pressure_min = duty_water_pressure
-
-        # if mop_water_pressure > mop_water_pressure_max:
-        #    mop_water_pressure_max = mop_water_pressure
-        # if mop_water_pressure < mop_water_pressure_min:
-        #    mop_water_pressure_min = mop_water_pressure
-
-        # display_str = "pass"
-        # if infrared_code == 1:
-        #     res = "OK"
-        #     display_str = "pass"
-        # elif infrared_code == 2:
-        #     res = "NG"
-        #     display_str = "fail"
-
-        # wx.CallAfter(MainFrame.main_frame.up_test_ui, "ir_rx", display_str)
-
-        # display_str = "pass"
-        # if infrared_code == 1:
-        #     res = "OK"
-        #     display_str = "pass"
-        # elif infrared_code == 2:
-        #     res = "NG"
-        #     display_str = "fail"
-        # wx.CallAfter(MainFrame.main_frame.up_test_ui, "ir_rx", display_str)
-
-        # display_str = "pass"
-        # if infrared_code == 1:
-        #     res = "OK"
-        #     display_str = "pass"
-        # elif infrared_code == 2:
-        #     res = "NG"
-        #     display_str = "fail"
-        # wx.CallAfter(MainFrame.main_frame.up_test_ui, "ir_rx", display_str)
-        ser_send_cmd(dev, cmd)  # 回复夹具开始测试
-    # 测试完成
+        if p is not None:
+            st = p["step"]
+            if st != rv30_last_step:
+                # #[RV30-PROTO] 步骤变化时刷新提示（步骤表仅作参考，可改文案/条件）
+                rv30_last_step = st
+                wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="治具步骤：" + str(st), color=wx.BLUE)
+            if not rv30_proto_yaml_realtime_ok(p):
+                rv30_proto_realtime_fail(dev, "yaml阈值:" + str(p))
+                return
+            if ver_res != "OK":
+                rv30_proto_realtime_fail(dev, "版本不匹配:" + str(dev_ver))
+                return
     elif cmd == 0x88:
-        ser_send_cmd(dev, 0x89)  # 回复夹具
-        res_value = dat[0]
-        res_display_str = ''
-        test_end_time = datetime.now()
-        print("jichentongceswanc")
-        if res_value == 0x01:
-            res_display_str = "测试完成  PASS"
-            wx.CallAfter(MainFrame.main_frame.up_test_ui, name="led_display",
-                         result="pass")
-            mes_run.add_report(name="led", result="OK",)
-        elif res_value == 0x00:
-            res_display_str = "条码没通过  NG"
-        elif res_value == 0x02:  # 需要处理，没有测试项
-            res_display_str = "测试结果异常，请检测"
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui,
-                         second="测试结果异常，请检测",
-                         color=wx.RED)
-        mes_run.add_report(name="mcu软件版本", result=ver_res,
-                value=dev_ver,
-                val_max=load_cfg.mcu_ver,
-                val_min=load_cfg.mcu_ver)
-        mes_run.add_report(name="充电电流",
-                    result="",
-                    value= str(charge_value),
-                    )
-        mes_run.add_report(name="热风",
-                           result="NG",
-                           value= str(hot_air),
-                           )
-        mes_run.add_report(name="左回充码",
-                           result="NG",
-                           value= str(ir_code_left),
-                           )
-        mes_run.add_report(name="右回充码",
-                    result="",
-                    value= str(ir_code_right),
-                    )
-        mes_run.add_report(name="近卫回充码",
-                           result="NG",
-                           value= str(ir_code_guard),
-                           )
-        mes_run.add_report(name="清水箱在位",
-                           result="NG",
-                           value= str(clear_tank_install),
-                           )
-        mes_run.add_report(name="污水箱在位",
-                    result="",
-                    value= str(duty_tank_install),
-                    )
-        mes_run.add_report(name="尘袋在位",
-                           result="NG",
-                           value= str(dust_bug_install),
-                           )
-        mes_run.add_report(name="清洁底座在位",
-                           result="NG",
-                           value= str(clean_base_install),
-                           )
-        mes_run.add_report(name="集尘吸力",
-                           result="NG",
-                           value= str(dust_collection_suction),
-                           )
-        mes_run.add_report(name="清水泵电流",
-                           result="NG",
-                           value= str(clean_water_pump_current),
-                           )
-        mes_run.add_report(name="污水泵电流",
-                    result="",
-                    value= str(duty_water_pump_current),
-                    )
-        mes_run.add_report(name="清洁泵电流",
-                           result="NG",
-                           value= str(cleaner_pump_current),
-                           )
-        mes_run.add_report(name="电磁三通电流",
-                           result="NG",
-                           value= str(electromagnetic_three_way_current),
-                           )
-        mes_run.add_report(name="清洁底座液位",
-                    result="",
-                    value= str(clean_base_liquid_level),
-                    )
-        mes_run.add_report(name="浊度数据",
-                           result="NG",
-                           value= str(turbidity_data),
-                           )
-        text_color = wx.RED
-        print("测试结果：" + res_display_str)
-        mes_ret = False
-        if res_value == 0x01:
-            text_color = wx.GREEN
-            mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "OK")
-        elif res_value != 0x00 and res_value != 0x0A:
-            mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "NG")
-        if mes_ret:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui,
-                         second=res_display_str,
-                         color=text_color)
-        clear_sn_save_list()
-
+        # #[RV30-PROTO] 结束帧：不向治具发 0x89 应答；综合判定见 rv30_proto_finalize_88
+        print("RV30 测试结束帧 dat[0]=" + str(dat[0] if dat else None))
+        rv30_proto_finalize_88(dev, dat)
+    else:
+        print("RV30 未处理命令 cmd=" + hex(cmd))
