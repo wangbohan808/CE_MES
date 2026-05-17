@@ -42,39 +42,39 @@ item_result = [
 
 #TODO使用时打开
 hw1_over_water_item_result = [
-    # {"clear_water_volume": ["清水通路水量：", "", "white"]},
-    # {"duty_water_volume": ["污水通路水量：", "", "white"]},
-    # {"left_mop_water_volume": ["左拖布水量：", "", "white"]},
-    # {"right_mop_water_volume": ["右拖布水量：", "", "white"]},
-    # {"left_mop_temperature": ["左拖布温度：", "", "white"]},
-    # {"right_mop_temperature": ["右拖布温度：", "", "white"]},
+    {"clear_water_volume": ["清水通路水量：", "", "white"]},
+    {"duty_water_volume": ["污水通路水量：", "", "white"]},
+    {"left_mop_water_volume": ["左拖布水量：", "", "white"]},
+    {"right_mop_water_volume": ["右拖布水量：", "", "white"]},
+    {"left_mop_temperature": ["左拖布温度：", "", "white"]},
+    {"right_mop_temperature": ["右拖布温度：", "", "white"]},
 ]
 
 #TODO使用时打开
 hw1_over_air_item_result = [
-    # {"clear_water_pressure": ["清水通路气压：", "", "white"]},
-    # {"duty_water_pressure": ["污水通路气压：", "", "white"]},
-    # {"left_mop_water_pressure": ["拖布通路气压：", "", "white"]},
+    {"clear_water_pressure": ["清水通路气压：", "", "white"]},
+    {"duty_water_pressure": ["污水通路气压：", "", "white"]},
+    {"left_mop_water_pressure": ["拖布通路气压：", "", "white"]},
 ]
 
 #TODO使用时打开
 hw1_basestation_produst_item_result = [
-    # {"charge_value": ["充电电流：", "", "white"]},
-    # {"hot_air": ["热风：", "", "white"]},
-    # {"ir_code_left": ["左回充码：", "", "white"]},
-    # {"ir_code_right": ["右回充码：", "", "white"]},
-    # {"ir_code_guard": ["近卫回充码：", "", "white"]},
-    # {"clear_tank_install": ["清水箱在位：", "", "white"]},
-    # {"duty_tank_install": ["污水箱在位：", "", "white"]},
-    # {"dust_bug_install": ["尘袋在位：", "", "white"]},
-    # {"clean_base_install": ["清洁底座在位：", "", "white"]},
-    # {"dust_collection_suction": ["集尘吸力：", "", "white"]},
-    # {"clean_water_pump_current": ["清水泵电流：", "", "white"]},
-    # {"duty_water_pump_current": ["污水泵电流：", "", "white"]},
-    # {"cleaner_pump_current": ["清洁泵电流：", "", "white"]},
-    # {"electromagnetic_three_way_current": ["电磁三通电流：", "", "white"]},
-    # {"clean_base_liquid_level": ["清洁底座液位：", "", "white"]},
-    # {"turbidity_data": ["浊度数据", "", "white"]},
+    {"charge_value": ["充电电流：", "", "white"]},
+    {"hot_air": ["热风：", "", "white"]},
+    {"ir_code_left": ["左回充码：", "", "white"]},
+    {"ir_code_right": ["右回充码：", "", "white"]},
+    {"ir_code_guard": ["近卫回充码：", "", "white"]},
+    {"clear_tank_install": ["清水箱在位：", "", "white"]},
+    {"duty_tank_install": ["污水箱在位：", "", "white"]},
+    {"dust_bug_install": ["尘袋在位：", "", "white"]},
+    {"clean_base_install": ["清洁底座在位：", "", "white"]},
+    {"dust_collection_suction": ["集尘吸力：", "", "white"]},
+    {"clean_water_pump_current": ["清水泵电流：", "", "white"]},
+    {"duty_water_pump_current": ["污水泵电流：", "", "white"]},
+    {"cleaner_pump_current": ["清洁泵电流：", "", "white"]},
+    {"electromagnetic_three_way_current": ["电磁三通电流：", "", "white"]},
+    {"clean_base_liquid_level": ["清洁底座液位：", "", "white"]},
+    {"turbidity_data": ["浊度数据", "", "white"]},
 
 ]
 
@@ -339,10 +339,14 @@ class MainFrame(wx.Frame):
         main_box.Add(test_static_box_sizer, 0, wx.EXPAND | wx.ALL, 5)
         dev = int(test.load_cfg.dev)
 
+
         # [FX_TODO]
         # if int(dev) > 100:
         #     test_static_box.Hide()
-        test_static_box.Hide()
+        if int(dev) != 50:
+            test_static_box.Hide()
+
+
         if int(dev) == 100 or int(dev) == 102 or int(dev) == 103:
             connect_static_box.Hide()
         self.Layout()

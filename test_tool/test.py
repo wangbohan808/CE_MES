@@ -156,7 +156,7 @@ def test_run_process():
     # 串口数据处理
     if int(load_cfg.dev) < 100:  # 海能主板测试工具 dev 小于100
         barcode_check_process()
-        test_serial_rx_data_handle()#########
+        test_serial_rx_data_handle()
     if test_work_state == "running":
         if int(load_cfg.dev) == 101:  # 打高压测试（耐压测试）
             withstand_vol.test_process()
@@ -341,7 +341,7 @@ def check_process_run_state():
         dev = int(load_cfg.dev)
         # [WEIGH-106] 106 与 101 等相同：扫码进入 running
         if dev == 100 or dev == 101 or dev == 102 or dev == 103 or dev == 104 or dev == 105 or dev == 106:
-            if barcode_msg_update:
+            if barcode_msg_update:  # 如果扫码枪收到条码，则进入运行状态
                 test_start_time = datetime.now()
                 test_work_state = "running"
                 barcode_msg_update = False
