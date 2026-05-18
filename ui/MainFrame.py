@@ -39,6 +39,20 @@ item_result = [
     {"suction": ["吸   力：", "", "white"]},
 ]
 
+# [up_test_ui_WBH] RV30(device_type=50) 测试格键名与 test.py 0x77 字段一致
+rv30_item_result = [
+    {"mcu_ver": ["MCU版本：", "", "white"]},
+    {"ir_code_left": ["左回充码：", "", "white"]},
+    {"ir_code_lc": ["左中回充：", "", "white"]},
+    {"ir_code_rc": ["右中回充：", "", "white"]},
+    {"ir_code_right": ["右回充码：", "", "white"]},
+    {"charge_value": ["充电电流：", "", "white"]},
+    {"rv30_freq": ["过零频率：", "", "white"]},
+    {"dust_bug_install": ["尘袋在位：", "", "white"]},
+    {"rv30_led": ["LED灯效：", "", "white"]},
+    {"dust_collection_suction": ["集尘吸力：", "", "white"]},
+]
+
 
 #TODO使用时打开
 hw1_over_water_item_result = [
@@ -284,7 +298,10 @@ class MainFrame(wx.Frame):
         test_static_box = wx.StaticBox(self, wx.ID_ANY, "")  # 添加方框标题
         test_static_box_sizer = wx.StaticBoxSizer(test_static_box, wx.HORIZONTAL)
         item_temp = item_result
-        if str(test.load_cfg.project_name) is not None and str(test.load_cfg.project_name) == "HW1" or str(test.load_cfg.project_name) == "RV50":
+        # [up_test_ui_WBH] RV30 基站成品使用专用测试项列表
+        if int(test.load_cfg.dev) == 50:
+            item_temp = rv30_item_result
+        elif str(test.load_cfg.project_name) is not None and str(test.load_cfg.project_name) == "HW1" or str(test.load_cfg.project_name) == "RV50":
             if int(test.load_cfg.dev) == 16:
                 item_temp = hw1_over_water_item_result
             if int(test.load_cfg.dev) == 15:
@@ -563,7 +580,8 @@ class MainFrame(wx.Frame):
         self.Layout()  # 刷新布局
 
     # 更新测试结果，name :item_result列表中字典的键值如，'led1'
-    # result 测试结果，"pass","fail","untested","reset"
+    # result 测试结果，"pass","fail","untested","reset","monitor"
+    # [up_test_ui_WBH] value 非空时中间列显示实测值（RV30 实时 0x77）
     def up_test_ui(self, name='', result='', value=''):
 
         for item in self.test_widget:
@@ -577,18 +595,24 @@ class MainFrame(wx.Frame):
             elif item.get(name):
                 widget_list = item[name]
                 if result == "pass":
-                    widget_list[1].SetLabel("通过")
+                    widget_list[1].SetLabel(str(value) if value else "通过")
                     widget_list[1].SetBackgroundColour(wx.Colour("green"))  # 绿色的RGB值
                     widget_list[1].Refresh()
                     widget_list[2].SetBitmap(get_bitmap("green"))
                 elif result == "fail":
-                    widget_list[1].SetLabel("不通过")
+                    widget_list[1].SetLabel(str(value) if value else "不通过")
                     widget_list[1].SetBackgroundColour(wx.Colour("red"))  # 绿色的RGB值
                     widget_list[1].Refresh()
                     widget_list[2].SetBitmap(get_bitmap("red"))
                 elif result == "untested":
                     widget_list[1].SetLabel("未测试")
                     widget_list[1].SetBackgroundColour(wx.Colour("white"))  # 绿色的RGB值
+                    widget_list[1].Refresh()
+                    widget_list[2].SetBitmap(get_bitmap("white"))
+                elif result == "monitor":
+                    # [up_test_ui_WBH] yaml 未配置阈值的监视项：只显示数值
+                    widget_list[1].SetLabel(str(value) if value else "")
+                    widget_list[1].SetBackgroundColour(wx.Colour("white"))
                     widget_list[1].Refresh()
                     widget_list[2].SetBitmap(get_bitmap("white"))
                 elif result == "reset":

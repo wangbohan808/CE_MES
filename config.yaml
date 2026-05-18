@@ -41,23 +41,24 @@
 device_type: "050"
 
 # #[RV30-PROTO] 基站050 实时判据：全为 0 表示该项不参与比较（调优见 test.py rv30_proto_yaml_realtime_ok）
+# #[RV30-PROTO-68-MOD] 治具发 0x68 后会覆盖下列 rv30_* 运行时阈值（见 rv30_proto_parse_68_dat）
 rv30_charge_Hmin: 0
-rv30_charge_Lmin: 0
+rv30_charge_Lmin: 100
 rv30_charge_Hmax: 0
-rv30_charge_Lmax: 0
-rv30_suction_10pa_Hmin: 0
-rv30_suction_10pa_Lmin: 0
-rv30_suction_10pa_Hmax: 0
-rv30_suction_10pa_Lmax: 0
-rv30_freq_min: 0
-rv30_freq_max: 0
-rv30_ir_l: 0
-rv30_ir_lc: 0
-rv30_ir_rc: 0
-rv30_ir_r: 0
-rv30_dust_bag_expected: 0
-rv30_led_expected: 0
-mcu_version: 002.001.002
+rv30_charge_Lmax: 200
+rv30_suction_10pa_Hmin: 3
+rv30_suction_10pa_Lmin: 32
+rv30_suction_10pa_Hmax: 7
+rv30_suction_10pa_Lmax: 208
+rv30_freq_min: 50
+rv30_freq_max: 50
+rv30_ir_l: 80
+rv30_ir_lc: 68
+rv30_ir_rc: 66
+rv30_ir_r: 72
+rv30_dust_bag_expected: 3
+rv30_led_expected: 3
+mcu_version: 005.001.029
 
 
 use_mes: "2"

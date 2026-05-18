@@ -116,8 +116,18 @@ RV30_SESS_FINISHED = 3
 RV30_SESS_ABORTED = 4
 rv30_session_state = RV30_SESS_IDLE
 rv30_last_step = -1
+rv30_max_step = 0  # [RV30-步骤4终判-WBH] 本轮实时数据到达过的最大治具步骤
 rv30_89_mes_done = False
 rv30_realtime_ng = False
+rv30_last_p = None  # [up_test_ui_WBH] 最近一帧 0x77 解析结果，供结束帧刷新测试格
+rv30_last_dust_notify = -1  # [RV30-尘袋步骤3-WBH] 防抖：上次已提示的 dust 状态
+# #[RV30-PROTO-68-MOD] 0x68 数据区字节数（回充4+版本4+频率1+尘袋1+充电4+LED1+集尘4）；PNG 若版本为 3 字节则改为 18 并改 parse 下标
+RV30_68_DATA_LEN = 19
+
+
+def _rv30_u16_be(hi, lo):
+    # #[RV30-PROTO-68-MOD] 协议 HH/LL 大端 16 位
+    return (int(hi) & 0xFF) << 8 | (int(lo) & 0xFF)
 
 
 # import sys
@@ -269,6 +279,7 @@ def barcode_check_process():
     global check_sn_str
     global rv30_session_state
     global rv30_last_step
+    global rv30_max_step
     global rv30_89_mes_done
     global rv30_realtime_ng
 
@@ -297,6 +308,7 @@ def barcode_check_process():
                 ser_send_data(dev=_txd, cmd=0x57, data=str_list)
                 rv30_session_state = RV30_SESS_RUNNING
                 rv30_last_step = -1
+                rv30_max_step = 0
                 rv30_89_mes_done = False
                 rv30_realtime_ng = False
             else:
@@ -666,11 +678,15 @@ def ser_send_data(dev, cmd, data):
 # #[RV30-PROTO] 以下为 RV30 基站(device_type=50) 专用辅助函数（调优入口：hw1_bastation_finished_product_mode_FX）
 def rv30_proto_reset_to_idle():
     # #[RV30-PROTO] 一轮测试完全结束后恢复空闲，便于下一轮 0x66
-    global rv30_session_state, rv30_last_step, rv30_89_mes_done, rv30_realtime_ng
+    global rv30_session_state, rv30_last_step, rv30_max_step, rv30_89_mes_done
+    global rv30_realtime_ng, rv30_last_p, rv30_last_dust_notify
     rv30_session_state = RV30_SESS_IDLE
     rv30_last_step = -1
+    rv30_max_step = 0
     rv30_89_mes_done = False
     rv30_realtime_ng = False
+    rv30_last_p = None  # [up_test_ui_WBH]
+    rv30_last_dust_notify = -1  # [RV30-尘袋步骤3-WBH]
 
 
 def rv30_proto_tx_dev_byte():
@@ -709,18 +725,60 @@ def rv30_proto_realtime_fail(dev, reason):
 
 
 def rv30_proto_parse_68_dat(dat):
-    # #[RV30-PROTO] 0x68 阈值数据区草稿（≥19 字节）：回充4+版本4+频率1+尘袋1+充电4+LED1+集尘4，详见规格 §8
-    if len(dat) < 19:
-        print("rv30 0x68 len short:", len(dat))
-        return
-    dust_th.cc_min = int(dat[10]) * 256 + int(dat[11])
-    dust_th.cc_max = int(dat[12]) * 256 + int(dat[13])
-    dust_th.ac_lv_max = int(dat[8])
-    dust_th.ac_lv_min = int(dat[8])
-    dust_th.barometer_min = int(dat[15]) * 256 + int(dat[16])
-    dust_th.barometer_max = int(dat[17]) * 256 + int(dat[18])
-    dust_th.out_barometer_max = dust_th.barometer_max
-    dust_th.out_barometer_min = dust_th.barometer_min
+    # #[RV30-PROTO-68-MOD] 解析治具 0x68「阈值上传」→ 写入 load_cfg.rv30_*（供 0x77 与 rv30_proto_yaml_realtime_ok 比对）
+    # 布局 doc/MES协议.csv「阈值上传」： [0-3]回充 [4-7]版本 [8]频率 [9]尘袋 [10-11]充电min [12-13]充电max [14]LED [15-18]集尘min/max
+    global load_cfg
+
+    if len(dat) < RV30_68_DATA_LEN:
+        print("[RV30-PROTO-68-MOD] 0x68 数据区长度不足: got", len(dat), "need", RV30_68_DATA_LEN)
+        return False
+
+    ir_l, ir_lc, ir_rc, ir_r = (int(dat[i]) for i in range(4))
+    ver_raw = ".".join(format(int(dat[i]), "03d") for i in range(4, 8))
+    freq = int(dat[8])
+    dust_bag = int(dat[9])
+    chg_min = _rv30_u16_be(dat[10], dat[11])
+    chg_max = _rv30_u16_be(dat[12], dat[13])
+    led = int(dat[14])
+    suction_min = _rv30_u16_be(dat[15], dat[16])
+    suction_max = _rv30_u16_be(dat[17], dat[18])
+
+    # #[RV30-PROTO-68-MOD] 与 rv30_proto_yaml_realtime_ok 四字节 H/L 编码一致（覆盖运行时阈值，yaml 启动值可被治具刷新）
+    load_cfg.rv30_ir_l = ir_l
+    load_cfg.rv30_ir_lc = ir_lc
+    load_cfg.rv30_ir_rc = ir_rc
+    load_cfg.rv30_ir_r = ir_r
+    load_cfg.rv30_charge_Hmin = (chg_min >> 8) & 0xFF
+    load_cfg.rv30_charge_Lmin = chg_min & 0xFF
+    load_cfg.rv30_charge_Hmax = (chg_max >> 8) & 0xFF
+    load_cfg.rv30_charge_Lmax = chg_max & 0xFF
+    load_cfg.rv30_suction_10pa_Hmin = (suction_min >> 8) & 0xFF
+    load_cfg.rv30_suction_10pa_Lmin = suction_min & 0xFF
+    load_cfg.rv30_suction_10pa_Hmax = (suction_max >> 8) & 0xFF
+    load_cfg.rv30_suction_10pa_Lmax = suction_max & 0xFF
+    load_cfg.rv30_freq_min = freq
+    load_cfg.rv30_freq_max = freq
+    load_cfg.rv30_dust_bag_expected = dust_bag
+    load_cfg.rv30_led_expected = led
+
+    # #[RV30-PROTO-68-MOD] 兼容旧 dust_th 字段（频率→ac_lv，集尘→barometer/out_barometer，勿再误用气压语义）
+    dust_th.cc_min = chg_min
+    dust_th.cc_max = chg_max
+    dust_th.ac_lv_min = freq
+    dust_th.ac_lv_max = freq
+    dust_th.barometer_min = suction_min
+    dust_th.barometer_max = suction_max
+    dust_th.out_barometer_min = suction_min
+    dust_th.out_barometer_max = suction_max
+
+    print(
+        "[RV30-PROTO-68-MOD] 阈值已加载 ir=%s,%s,%s,%s ver=%s freq=%s dust=%s "
+        "chg=[%02X,%02X]-[%02X,%02X] led=%s suction=[%02X,%02X]-[%02X,%02X]"
+        % (ir_l, ir_lc, ir_rc, ir_r, ver_raw, freq, dust_bag,
+           dat[10], dat[11], dat[12], dat[13], led,
+           dat[15], dat[16], dat[17], dat[18])
+    )
+    return True
 
 
 def rv30_proto_parse_77_apply_globals(dat):
@@ -762,59 +820,317 @@ def rv30_proto_parse_77_apply_globals(dat):
     }
 
 
-def rv30_proto_yaml_realtime_ok(p):
-    # #[RV30-PROTO] 以 config.yaml 为主与 0x77 解析结果比对；返回 False 表示应走实时异常
+def rv30_field_active(step, field):
+    # [RV30-测试项分步报错-WBH] 步骤1回充码；2+版本/频率；3+充电/尘袋/LED(不含集尘)；4+集尘吸力
+    st = int(step) if step is not None else 0
+    if st < 1:
+        return False
+    if field in ("ir_l", "ir_lc", "ir_rc", "ir_r"):
+        return st >= 1
+    if field in ("dev_ver", "freq"):
+        return st >= 2
+    if field in ("charge", "dust", "led"):
+        return st >= 3
+    if field == "suction_pa":
+        return st >= 4
+    return False
+
+
+# [RV30-步骤3监视-WBH] 步骤3仅监视/尘袋提示，不参与 yaml 实时 NG
+RV30_STEP3_MONITOR_FIELDS = ("charge", "dust", "led")
+
+
+def rv30_step3_monitor_phase(p):
+    # [RV30-步骤3监视-WBH]
+    return p is not None and int(p.get("step", 0)) == 3
+
+
+def rv30_dust_step3_ui(p):
+    # [RV30-尘袋步骤3-WBH] 0/1/2/3 → 未测试/红+文案/绿；步骤3不打断流程
+    d = int(p.get("dust", 0))
+    if d == 0:
+        return "untested", ""
+    if d == 1:
+        return "fail", "取出尘袋"
+    if d == 2:
+        return "fail", "放入尘袋"
+    if d == 3:
+        return "pass", str(d)
+    return "fail", str(d)
+
+
+def rv30_dust_step3_notify(p):
+    # [RV30-尘袋步骤3-WBH] 顶部提示：1 取出 / 2 放入 / 3 通过；0 不改动
+    global rv30_last_dust_notify
+    if p is None or int(p.get("step", 0)) != 3:
+        return
+    d = int(p.get("dust", 0))
+    if d == rv30_last_dust_notify:
+        return
+    rv30_last_dust_notify = d
+    mf = MainFrame.main_frame
+    if mf is None:
+        return
+    if d == 1:
+        mf.up_notification_ui(second="取出尘袋", color=wx.RED)
+    elif d == 2:
+        mf.up_notification_ui(second="放入尘袋", color=wx.RED)
+    elif d == 3:
+        mf.up_notification_ui(second="请工人观察LED灯显示，正常按开始键，异常按结束键", color=wx.RED)
+
+
+def rv30_dust_field_status(p):
+    # [RV30-尘袋步骤3-WBH] 步骤3用状态机；步骤>3 仍用 yaml 期望(通常为3)
+    if p is None:
+        return "untested"
+    step = int(p.get("step", 0))
+    if step < 3:
+        return "untested"
+    if step == 3:
+        d = int(p.get("dust", 0))
+        if d == 0:
+            return "untested"
+        if d in (1, 2):
+            return False
+        if d == 3:
+            return True
+        return False
+    return rv30_field_ok(p, "dust")
+
+
+def rv30_dust_flow_complete(p):
+    # [RV30-尘袋步骤3-WBH] 曾到步骤3则结束帧要求 dust==3
     if p is None:
         return True
+    if int(p.get("step", 0)) < 3:
+        return True
+    return int(p.get("dust", 0)) == 3
 
-    expect_ver = (load_cfg.mcu_ver or "").strip()
-    if expect_ver and p.get("dev_ver") != expect_ver:
-        return False    
 
-    ch = (
-        load_cfg.rv30_charge_Hmin, load_cfg.rv30_charge_Lmin,
-        load_cfg.rv30_charge_Hmax,load_cfg.rv30_charge_Lmax,
-    )
-    if ch != (0, 0, 0, 0):
-        lo = (ch[0] << 8) | (ch[2] & 0xFF)
-        hi = (ch[1] << 8) | (ch[3] & 0xFF)
+def rv30_field_status(p, field):
+    # [RV30-测试项分步报错-WBH] 未到步骤→"untested"；到步骤后同 rv30_field_ok(True/False/None)
+    # [RV30-步骤3监视-WBH] 步骤3：charge/led 仅 monitor；dust 走状态机
+    if p is None:
+        return "untested"
+    step = int(p.get("step", 0))
+    if field == "dust":
+        return rv30_dust_field_status(p)
+    if step == 3 and field in ("charge", "led"):
+        return None
+    if not rv30_field_active(step, field):
+        return "untested"
+    return rv30_field_ok(p, field)
+
+
+def rv30_field_status_finalize(p, field):
+    # [RV30-步骤3监视-WBH] 0x88 终态：step>=4 按 yaml 全量判；step==3 仍用尘袋状态机
+    if p is None:
+        return "untested"
+    step = int(p.get("step", 0))
+    if step == 3:
+        if field == "dust":
+            return rv30_dust_field_status(p)
+        if field in ("charge", "led"):
+            return None
+        if not rv30_field_active(step, field):
+            return "untested"
+        return rv30_field_ok(p, field)
+    if step < 4:
+        return rv30_field_status(p, field)
+    if field == "dust":
+        d = int(p.get("dust", 0))
+        return True if d == 3 else False
+    if not rv30_field_active(step, field):
+        return "untested"
+    return rv30_field_ok(p, field)
+
+
+def rv30_proto_yaml_all_items_ok(p):
+    # [RV30-步骤4终判-WBH] 步骤4：对已开放项做全量 yaml 比对（False=NG；None=未配置跳过）
+    if p is None:
+        return False
+    step = int(p.get("step", 0))
+    if step < 4:
+        return False
+    for field in (
+        "dev_ver", "charge", "suction_pa", "freq",
+        "ir_l", "ir_lc", "ir_rc", "ir_r", "dust", "led",
+    ):
+        if not rv30_field_active(step, field):
+            continue
+        if field == "dust":
+            if int(p.get("dust", 0)) != 3:
+                return False
+            continue
+        ok = rv30_field_ok(p, field)
+        if ok is False:
+            return False
+    return True
+
+
+def rv30_proto_yaml_finalize_ok(p):
+    # [RV30-步骤4终判-WBH] 0x88 综合 PASS：本轮须到过步骤4，且最后一帧在步骤4+且全项达标
+    global rv30_max_step
+    if rv30_max_step < 4:
+        return False
+    if p is None:
+        return False
+    if int(p.get("step", 0)) < 4:
+        return False
+    return rv30_proto_yaml_all_items_ok(p)
+
+
+def rv30_field_ok(p, field):
+    # [up_test_ui_WBH] 单项判据：True/False=参与比较；None=yaml 未配置该项
+    if p is None:
+        return None
+    if field == "dev_ver":
+        expect_ver = (load_cfg.mcu_ver or "").strip()
+        if not expect_ver:
+            return None
+        return p.get("dev_ver") == expect_ver
+    if field == "charge":
+        ch = (
+            load_cfg.rv30_charge_Hmin, load_cfg.rv30_charge_Lmin,
+            load_cfg.rv30_charge_Hmax, load_cfg.rv30_charge_Lmax,
+        )
+        if ch == (0, 0, 0, 0):
+            return None
+        lo = (ch[0] << 8) | (ch[1] & 0xFF)
+        hi = (ch[2] << 8) | (ch[3] & 0xFF)
         if lo > hi:
             lo, hi = hi, lo
-        if not (lo <= p["charge"] <= hi):
-            return False
-    su = (
-        load_cfg.rv30_suction_10pa_Hmin, load_cfg.rv30_suction_10pa_Lmin,
-        load_cfg.rv30_suction_10pa_Hmax, load_cfg.rv30_suction_10pa_Lmax,
-    )
-    if su != (0, 0, 0, 0):
-        slo = (su[0] << 8) | (su[2] & 0xFF)
-        shi = (su[1] << 8) | (su[3] & 0xFF)
+        return lo <= p["charge"] <= hi
+    if field == "suction_pa":
+        su = (
+            load_cfg.rv30_suction_10pa_Hmin, load_cfg.rv30_suction_10pa_Lmin,
+            load_cfg.rv30_suction_10pa_Hmax, load_cfg.rv30_suction_10pa_Lmax,
+        )
+        if su == (0, 0, 0, 0):
+            return None
+        slo = (su[0] << 8) | (su[1] & 0xFF)
+        shi = (su[2] << 8) | (su[3] & 0xFF)
         if slo > shi:
             slo, shi = shi, slo
-        if not (slo <= p["suction_pa"] <= shi):
-            return False
-
-
-    fmin, fmax = load_cfg.rv30_freq_min, load_cfg.rv30_freq_max
-    if fmin != 0 or fmax != 0:
+        return slo <= p["suction_pa"] <= shi
+    if field == "freq":
+        fmin, fmax = load_cfg.rv30_freq_min, load_cfg.rv30_freq_max
+        if fmin == 0 and fmax == 0:
+            return None
         flo, fhi = (fmin, fmax) if fmin <= fmax else (fmax, fmin)
-        if not (flo <= p["freq"] <= fhi):
+        return flo <= p["freq"] <= fhi
+    if field == "ir_l":
+        if not load_cfg.rv30_ir_l:
+            return None
+        return p["ir_l"] == load_cfg.rv30_ir_l
+    if field == "ir_lc":
+        if not load_cfg.rv30_ir_lc:
+            return None
+        return p["ir_lc"] == load_cfg.rv30_ir_lc
+    if field == "ir_rc":
+        if not load_cfg.rv30_ir_rc:
+            return None
+        return p["ir_rc"] == load_cfg.rv30_ir_rc
+    if field == "ir_r":
+        if not load_cfg.rv30_ir_r:
+            return None
+        return p["ir_r"] == load_cfg.rv30_ir_r
+    if field == "dust":
+        if not load_cfg.rv30_dust_bag_expected:
+            return None
+        return p["dust"] == load_cfg.rv30_dust_bag_expected
+    if field == "led":
+        if not load_cfg.rv30_led_expected:
+            return None
+        return p["led"] == load_cfg.rv30_led_expected
+    return None
+
+
+def rv30_proto_yaml_realtime_ok(p):
+    # #[RV30-PROTO] 以 config.yaml 为主与 0x77 解析结果比对；返回 False 表示应走实时异常
+    # [up_test_ui_WBH] 汇总单项 rv30_field_ok
+    # [RV30-测试项分步报错-WBH] 仅当前治具步骤已开放的项参与实时 NG
+    # [RV30-步骤3监视-WBH] 步骤3整帧不实时 NG（尘袋提示+充电/LED 监视），步骤4再判
+    if p is None:
+        return True
+    step = int(p.get("step", 0))
+    if step == 3:
+        return True
+    for field in (
+        "dev_ver", "charge", "suction_pa", "freq",
+        "ir_l", "ir_lc", "ir_rc", "ir_r", "dust", "led",
+    ):
+        if not rv30_field_active(step, field):
+            continue
+        ok = rv30_field_ok(p, field)
+        if ok is False:
             return False
-
-    if load_cfg.rv30_ir_l and p["ir_l"] != load_cfg.rv30_ir_l:
-        return False
-    if load_cfg.rv30_ir_lc and p["ir_lc"] != load_cfg.rv30_ir_lc:
-        return False
-    if load_cfg.rv30_ir_rc and p["ir_rc"] != load_cfg.rv30_ir_rc:
-        return False
-    if load_cfg.rv30_ir_r and p["ir_r"] != load_cfg.rv30_ir_r:
-        return False
-
-    if load_cfg.rv30_dust_bag_expected and p["dust"] != load_cfg.rv30_dust_bag_expected:
-        return False
-    if load_cfg.rv30_led_expected and p["led"] != load_cfg.rv30_led_expected:
-        return False
     return True
+
+
+def rv30_proto_ui_result_str(ok):
+    # [up_test_ui_WBH] 单项判据 → up_test_ui 的 result 参数
+    # [RV30-测试项分步报错-WBH]
+    if ok == "untested":
+        return "untested"
+    if ok is True:
+        return "pass"
+    if ok is False:
+        return "fail"
+    return "monitor"
+
+
+def rv30_proto_apply_test_ui_row(p, ui_name, field, val, finalize=False):
+    # [RV30-步骤3监视-WBH] 统一刷新单行；finalize 用终态判据
+    if finalize:
+        st = rv30_field_status_finalize(p, field)
+    else:
+        if field == "dust" and rv30_step3_monitor_phase(p):
+            res, show_val = rv30_dust_step3_ui(p)
+            MainFrame.main_frame.up_test_ui(name=ui_name, result=res, value=show_val)
+            return
+        if rv30_step3_monitor_phase(p) and field in ("charge", "led"):
+            MainFrame.main_frame.up_test_ui(name=ui_name, result="monitor", value=val)
+            return
+        st = rv30_field_status(p, field)
+    if st == "untested":
+        res, show_val = "untested", ""
+    elif st is False:
+        res, show_val = "fail", val
+    elif st is True:
+        res, show_val = "pass", val
+    else:
+        res, show_val = "monitor", val
+    MainFrame.main_frame.up_test_ui(name=ui_name, result=res, value=show_val)
+
+
+def rv30_proto_refresh_test_ui(p, finalize=False):
+    # [up_test_ui_WBH] 0x77 实时刷新 test_static_box（须在 UI 线程 CallAfter 调用）
+    # [RV30-测试项分步报错-WBH] 未到步骤显示未测试，到步骤后再判 pass/fail/monitor
+    # [RV30-步骤3监视-WBH] 步骤3 charge/led 仅 monitor；0x88 且 step>=4 时 finalize=True 全量判
+    if p is None or MainFrame.main_frame is None:
+        return
+    rows = [
+        ("mcu_ver", "dev_ver", p["dev_ver"]),
+        ("ir_code_left", "ir_l", str(p["ir_l"])),
+        ("ir_code_lc", "ir_lc", str(p["ir_lc"])),
+        ("ir_code_rc", "ir_rc", str(p["ir_rc"])),
+        ("ir_code_right", "ir_r", str(p["ir_r"])),
+        ("charge_value", "charge", str(p["charge"])),
+        ("rv30_freq", "freq", str(p["freq"])),
+        ("dust_bug_install", "dust", str(p["dust"])),
+        ("rv30_led", "led", str(p["led"])),
+        ("dust_collection_suction", "suction_pa", str(p["suction_pa"])),
+    ]
+    for ui_name, field, val in rows:
+        rv30_proto_apply_test_ui_row(p, ui_name, field, val, finalize=finalize)
+    if not finalize and rv30_step3_monitor_phase(p):
+        rv30_dust_step3_notify(p)
+
+
+def rv30_proto_refresh_test_ui_callafter(p):
+    # [up_test_ui_WBH] 从串口线程安全投递到 UI 线程
+    wx.CallAfter(rv30_proto_refresh_test_ui, p)
 
 
 def rv30_proto_add_fx_reports():
@@ -836,26 +1152,76 @@ def rv30_proto_finalize_88(dev, dat):
     test_end_time = datetime.now()
     res_byte = dat[0] if len(dat) else 0xFF
     if rv30_89_mes_done:
-        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="本轮已异常上报，收到治具结束帧", color=wx.RED)
+        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="测试失败", color=wx.RED)
         rv30_session_state = RV30_SESS_FINISHED
         clear_sn_save_list()
         rv30_proto_reset_to_idle()
         return
     normal_end = res_byte == 0x03
-    mes_ok = normal_end and (not rv30_realtime_ng) and (ver_res == "OK")
+    global rv30_last_p
+    # [RV30-步骤4终判-WBH] 须到过步骤4且最后一帧全项达标；步骤3不 fail，步骤1/2 仍走实时 NG
+    mes_ok = (normal_end and (not rv30_realtime_ng) and (ver_res == "OK")
+              and rv30_proto_yaml_finalize_ok(rv30_last_p))
+    # [RV30-步骤3监视-WBH] MES 明细仅在 0x88 统一写入（步骤3不上传）
     rv30_proto_add_fx_reports()
     if mes_ok:
         mes_run.add_report(name="led", result="OK")
         res_display_str = "测试完成(综合判定 PASS)"
         text_color = wx.GREEN
         mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "OK")
-        wx.CallAfter(MainFrame.main_frame.up_test_ui, name="led_display", result="pass")
     else:
         mes_run.add_report(name="led", result="NG")
         res_display_str = "测试结束(综合判定 NG)"
         text_color = wx.RED
         mes_ret = mes_run.send_report(test_start_time, test_end_time, check_sn_str, "NG")
-        wx.CallAfter(MainFrame.main_frame.up_test_ui, name="led_display", result="fail")
+    # [up_test_ui_WBH] 结束帧用最后一帧 0x77 刷新测试格；综合 NG 时未配置阈值的项也标 fail
+    # [RV30-测试项分步报错-WBH] 结束刷新同样按最后一帧 step 分步；未到步骤保持未测试
+    if rv30_last_p is not None:
+        use_finalize_ui = int(rv30_last_p.get("step", 0)) >= 4
+        if mes_ok:
+            wx.CallAfter(
+                rv30_proto_refresh_test_ui, rv30_last_p, use_finalize_ui)
+        else:
+            def _finalize_ui_refresh():
+                p = rv30_last_p
+                if p is None:
+                    return
+                rows = [
+                    ("mcu_ver", "dev_ver", p["dev_ver"]),
+                    ("ir_code_left", "ir_l", str(p["ir_l"])),
+                    ("ir_code_lc", "ir_lc", str(p["ir_lc"])),
+                    ("ir_code_rc", "ir_rc", str(p["ir_rc"])),
+                    ("ir_code_right", "ir_r", str(p["ir_r"])),
+                    ("charge_value", "charge", str(p["charge"])),
+                    ("rv30_freq", "freq", str(p["freq"])),
+                    ("dust_bug_install", "dust", str(p["dust"])),
+                    ("rv30_led", "led", str(p["led"])),
+                    ("dust_collection_suction", "suction_pa", str(p["suction_pa"])),
+                ]
+                fin = int(p.get("step", 0)) >= 4
+                for ui_name, field, val in rows:
+                    if not fin and field == "dust" and int(p.get("step", 0)) == 3:
+                        res, show_val = rv30_dust_step3_ui(p)
+                        MainFrame.main_frame.up_test_ui(
+                            name=ui_name, result=res, value=show_val)
+                        continue
+                    if fin:
+                        rv30_proto_apply_test_ui_row(
+                            p, ui_name, field, val, finalize=True)
+                        continue
+                    st = rv30_field_status(p, field)
+                    if st == "untested":
+                        res, show_val = "untested", ""
+                    elif st is False or (rv30_realtime_ng and st is not True):
+                        res, show_val = "fail", val
+                    elif st is True:
+                        res, show_val = "pass", val
+                    else:
+                        res, show_val = "monitor", val
+                    MainFrame.main_frame.up_test_ui(
+                        name=ui_name, result=res, value=show_val)
+
+            wx.CallAfter(_finalize_ui_refresh)
     if mes_ret:
         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second=res_display_str, color=text_color)
     rv30_session_state = RV30_SESS_FINISHED
@@ -2785,8 +3151,11 @@ def RV30_finished_product_mode(dev, cmd, dat):
     global dust_collection_suction
     global rv30_session_state
     global rv30_last_step
+    global rv30_max_step
     global rv30_89_mes_done
     global rv30_realtime_ng
+    global rv30_last_p  # [up_test_ui_WBH]
+    global rv30_last_dust_notify  # [RV30-尘袋步骤3-WBH]
     if len(dat) <= 0:
         print("len=0 无有效数据")
         return
@@ -2799,8 +3168,10 @@ def RV30_finished_product_mode(dev, cmd, dat):
             tool.clear_queue(barcode_q)
             check_sn_enable = True
             rv30_last_step = -1
+            rv30_max_step = 0
             rv30_89_mes_done = False
             rv30_realtime_ng = False
+            rv30_last_dust_notify = -1  # [RV30-尘袋步骤3-WBH]
             rv30_session_state = RV30_SESS_WAIT_SN
             print("RV30 扫描枪扫描二维码")
             wx.CallAfter(MainFrame.main_frame.reset_ui)
@@ -2818,10 +3189,14 @@ def RV30_finished_product_mode(dev, cmd, dat):
     #     else:
     #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="继续测试")
     # elif cmd == 0x68:
-    #     # #[RV30-PROTO] 阈值上传：草稿解析写入 dust_th，长度与下标见规格 §8 / 通讯协议.png
+    #     # #[RV30-PROTO-68-MOD] 阈值上传：解析后刷新 load_cfg.rv30_*，供后续 0x77 判据使用
     #     print("RV30 阈值上传 len=" + str(len(dat)) + " dat=" + str(dat))
-    #     rv30_proto_parse_68_dat(dat)
-    #     wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="已收到阈值上传", color=wx.RED)
+    #     if rv30_proto_parse_68_dat(dat):
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui,
+    #                      second="已加载治具阈值(0x68)", color=wx.BLUE)
+    #     else:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui,
+    #                      second="0x68 阈值帧长度异常", color=wx.RED)
     elif cmd == 0x77:
         # #[RV30-PROTO-77-MOD] 实时数据：数据区 15 字节；不向治具回帧；与 config.yaml rv30_* 比对
         print("RV30 实时数据 len=" + str(len(dat)) + " dat=" + str(dat))
@@ -2832,11 +3207,16 @@ def RV30_finished_product_mode(dev, cmd, dat):
         p = rv30_proto_parse_77_apply_globals(dat)
         wx.CallAfter(MainFrame.main_frame.up_ver_ui, dev_ver)
         if p is not None:
+            rv30_last_p = p  # [up_test_ui_WBH]
+            rv30_proto_refresh_test_ui_callafter(p)  # [up_test_ui_WBH]
             st = p["step"]
+            if int(st) > rv30_max_step:
+                rv30_max_step = int(st)
             if st != rv30_last_step:
                 # #[RV30-PROTO] 步骤变化时刷新提示（步骤表仅作参考，可改文案/条件）
                 rv30_last_step = st
                 wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="治具步骤：" + str(st), color=wx.BLUE)
+            # [RV30-测试项分步报错-WBH] 仅当前 step 已开放项参与实时 NG
             if not rv30_proto_yaml_realtime_ok(p):
                 rv30_proto_realtime_fail(dev, "yaml阈值:" + str(p))
                 return
