@@ -76,7 +76,7 @@
 
 - `dat` 长度 `< 1`：视为数据异常，UI 提示「治具数据异常」并返回。
 - `dev` 与 `load_cfg.dev` 不一致：提示「治具类型不匹配」，**不进入**各 `*_mode` 分支（注意：仍会 `print`，与 `check_cfg_dev` 等其它路径的关系若需统一行为可再查）。
-- 否则按 `dev` 分发到不同治具逻辑；**设备 `50`** 当前走向：`hw1_bastation_finished_product_mode_FX(dev, cmd, dat)`（命名含拼写 `bastation`，搜索时注意）。
+- 否则按 `dev` 分发到不同治具逻辑；**设备 `50`** 当前走向：`RV30_finished_product_mode(dev, cmd, dat)`（命名含拼写 `bastation`，搜索时注意）。
 
 ### 4.4 发送辅助（同文件约 556–574 行）
 

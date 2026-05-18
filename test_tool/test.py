@@ -71,10 +71,14 @@ class LoadCfg:
     weigh_history_json_path: str = "weigh_106_history.json"
     # --- WEIGH-106-END ---
     # #[RV30-PROTO] 基站 device_type=50 实时判据（config.yaml，与 doc/ce_mes_iteration/RV30_BASESTATION_PROTOCOL_AND_IMPLEMENTATION_SPEC.md 一致）
-    rv30_charge_min: int = 0
-    rv30_charge_max: int = 0
-    rv30_suction_pa_min: int = 0
-    rv30_suction_pa_max: int = 0
+    rv30_charge_Hmin: int = 0
+    rv30_charge_Hmax: int = 0
+    rv30_charge_Lmin: int = 0
+    rv30_charge_Lmax: int = 0
+    rv30_suction_10pa_Hmin: int = 0
+    rv30_suction_10pa_Hmax: int = 0
+    rv30_suction_10pa_Lmin: int = 0
+    rv30_suction_10pa_Lmax: int = 0
     rv30_freq_min: int = 0
     rv30_freq_max: int = 0
     rv30_ir_l: int = 0
@@ -104,7 +108,7 @@ class DustThreshold:
 dust_th = DustThreshold()
 load_cfg = LoadCfg()
 
-# #[RV30-PROTO] RV30 基站(device_type=50) 会话状态机常量（调优时只改 hw1_bastation_finished_product_mode_FX 与下列变量）
+# #[RV30-PROTO] RV30 基站(device_type=50) 会话状态机常量（调优时只改 RV30_finished_product_mode 与下列变量）
 RV30_SESS_IDLE = 0
 RV30_SESS_WAIT_SN = 1
 RV30_SESS_RUNNING = 2
@@ -284,7 +288,7 @@ def barcode_check_process():
                 ser_send_data(dev=_txd, cmd=0x58, data=str_list)
                 ser_send_data(dev=_txd, cmd=0x89, data=[0x03])
                 check_sn_str = sn
-                rv30_proto_abort_mes_after_gate_fail()
+                # rv30_proto_abort_mes_after_gate_fail()     # 这一步失败不需要上报
                 check_sn_enable = False
                 return
             res = mes_run.check_sn_is_ok(sn)
@@ -298,7 +302,7 @@ def barcode_check_process():
             else:
                 ser_send_data(dev=_txd, cmd=0x58, data=str_list)
                 ser_send_data(dev=_txd, cmd=0x89, data=[0x03])
-                rv30_proto_abort_mes_after_gate_fail()
+                # rv30_proto_abort_mes_after_gate_fail()
             check_sn_enable = False
             return
         elif 0 < int(load_cfg.dev) < 100:
@@ -431,12 +435,20 @@ def load_config():
     load_cfg.weigh_history_json_path = _whp or "weigh_106_history.json"
 
     # #[RV30-PROTO] 从 config.yaml 读取 RV30 判据（缺省 0 表示不启用该项比较）
-    load_cfg.rv30_charge_min = int(config.get("rv30_charge_min", getattr(load_cfg, "rv30_charge_min", 0)))
-    load_cfg.rv30_charge_max = int(config.get("rv30_charge_max", getattr(load_cfg, "rv30_charge_max", 0)))
-    load_cfg.rv30_suction_pa_min = int(
-        config.get("rv30_suction_pa_min", getattr(load_cfg, "rv30_suction_pa_min", 0)))
-    load_cfg.rv30_suction_pa_max = int(
-        config.get("rv30_suction_pa_max", getattr(load_cfg, "rv30_suction_pa_max", 0)))
+
+    load_cfg.rv30_charge_Hmin = int(config.get("rv30_charge_Hmin", getattr(load_cfg, "rv30_charge_Hmin", 0)))
+    load_cfg.rv30_charge_Hmax = int(config.get("rv30_charge_Hmax", getattr(load_cfg, "rv30_charge_Hmax", 0)))
+    load_cfg.rv30_charge_Lmin = int(config.get("rv30_charge_Lmin", getattr(load_cfg, "rv30_charge_Lmin", 0)))
+    load_cfg.rv30_charge_Lmax = int(config.get("rv30_charge_Lmax", getattr(load_cfg, "rv30_charge_Lmax", 0)))
+    load_cfg.rv30_suction_10pa_Hmin = int(
+        config.get("rv30_suction_10pa_Hmin", getattr(load_cfg, "rv30_suction_10pa_Hmin", 0)))
+    load_cfg.rv30_suction_10pa_Hmax = int(
+        config.get("rv30_suction_10pa_Hmax", getattr(load_cfg, "rv30_suction_10pa_Hmax", 0)))
+    load_cfg.rv30_suction_10pa_Lmin = int(
+        config.get("rv30_suction_10pa_Lmin", getattr(load_cfg, "rv30_suction_10pa_Lmin", 0)))
+    load_cfg.rv30_suction_10pa_Lmax = int(
+        config.get("rv30_suction_10pa_Lmax", getattr(load_cfg, "rv30_suction_10pa_Lmax", 0)))
+
     load_cfg.rv30_freq_min = int(config.get("rv30_freq_min", getattr(load_cfg, "rv30_freq_min", 0)))
     load_cfg.rv30_freq_max = int(config.get("rv30_freq_max", getattr(load_cfg, "rv30_freq_max", 0)))
     load_cfg.rv30_ir_l = int(config.get("rv30_ir_l", getattr(load_cfg, "rv30_ir_l", 0)))
@@ -629,7 +641,7 @@ def test_cmd_handle(dev, cmd, dat):
            hw1_bastation_finished_product_mode(dev, cmd, dat)
         #[FX_TODO]
         elif int(dev) == 50 or (int(load_cfg.dev) == 50 and int(dev) == 0x50):  # #[RV30-PROTO] 帧设备字节 50/0x50 均进 FX
-           hw1_bastation_finished_product_mode_FX(dev, cmd, dat)
+           RV30_finished_product_mode(dev, cmd, dat)
 
 
 def ser_send_cmd(dev, cmd):
@@ -712,23 +724,25 @@ def rv30_proto_parse_68_dat(dat):
 
 
 def rv30_proto_parse_77_apply_globals(dat):
-    # #[RV30-PROTO] 0x77 数据区：步骤+回充左/左中/右中/右+版本4+频率+尘袋+充电+LED+集尘(×10Pa)；下标随通讯协议.png 联调修订
+    # #[RV30-PROTO-77-MOD] 0x77 数据区固定 15 字节（帧长字段=17=设备+命令+数据区）：
+    # [0步骤,1左红外,2左中,3右中,4右红外,5~7版本3B,8频率,9尘袋,10~11充电ADC,12LED灯,13~14集尘吸力]；集尘×10Pa
     global charge_value, dev_ver, ver_res
-    global ir_code_left, ir_code_right, ir_code_guard
+    global ir_code_left, ir_code_lc, ir_code_right, ir_code_rc
     global dust_bug_install, dust_collection_suction
-    if len(dat) < 16:
+    if len(dat) < 15:
+        print("[RV30-PROTO-77-MOD] 0x77 数据区长度不足:", len(dat))
         return None
     step = int(dat[0])
     ir_code_left = int(dat[1])
-    ir_code_guard = int(dat[3])
+    ir_code_lc = int(dat[2])
+    ir_code_rc = int(dat[3])   # 右中红外（变量名保留，兼容 UI/MES 键）
     ir_code_right = int(dat[4])
-    ir_lc = int(dat[2])
-    charge_value = int(dat[11]) << 8 | int(dat[12])
-    dust_bug_install = int(dat[10])
-    dust_collection_suction = (int(dat[14]) << 8 | int(dat[15])) * 10
     dev_ver = ".".join(format(int(dat[i]), "03d") for i in range(5, 8))
-    if len(dat) > 8:
-        dev_ver += "." + format(int(dat[8]), "03d")
+    freq = int(dat[8])
+    dust_bug_install = int(dat[9])
+    charge_value = int(dat[10]) << 8 | int(dat[11])
+    led = int(dat[12])
+    dust_collection_suction = (int(dat[13]) << 8 | int(dat[14]))
     if dev_ver == load_cfg.mcu_ver:
         ver_res = "OK"
     else:
@@ -736,13 +750,14 @@ def rv30_proto_parse_77_apply_globals(dat):
     return {
         "step": step,
         "ir_l": ir_code_left,
-        "ir_lc": ir_lc,
-        "ir_rc": ir_code_guard,
+        "ir_lc": ir_code_lc,
+        "ir_rc": ir_code_rc,
         "ir_r": ir_code_right,
-        "freq": int(dat[9]) if len(dat) > 9 else 0,
-        "dust": int(dat[10]) if len(dat) > 10 else 0,
+        "dev_ver": dev_ver,
+        "freq": freq,
+        "dust": dust_bug_install,
         "charge": charge_value,
-        "led": int(dat[13]) if len(dat) > 13 else 0,
+        "led": led,
         "suction_pa": dust_collection_suction,
     }
 
@@ -751,21 +766,41 @@ def rv30_proto_yaml_realtime_ok(p):
     # #[RV30-PROTO] 以 config.yaml 为主与 0x77 解析结果比对；返回 False 表示应走实时异常
     if p is None:
         return True
-    cmin, cmax = load_cfg.rv30_charge_min, load_cfg.rv30_charge_max
-    if cmin != 0 or cmax != 0:
-        lo, hi = (cmin, cmax) if cmin <= cmax else (cmax, cmin)
+
+    expect_ver = (load_cfg.mcu_ver or "").strip()
+    if expect_ver and p.get("dev_ver") != expect_ver:
+        return False    
+
+    ch = (
+        load_cfg.rv30_charge_Hmin, load_cfg.rv30_charge_Lmin,
+        load_cfg.rv30_charge_Hmax,load_cfg.rv30_charge_Lmax,
+    )
+    if ch != (0, 0, 0, 0):
+        lo = (ch[0] << 8) | (ch[2] & 0xFF)
+        hi = (ch[1] << 8) | (ch[3] & 0xFF)
+        if lo > hi:
+            lo, hi = hi, lo
         if not (lo <= p["charge"] <= hi):
             return False
-    smin, smax = load_cfg.rv30_suction_pa_min, load_cfg.rv30_suction_pa_max
-    if smin != 0 or smax != 0:
-        slo, shi = (smin, smax) if smin <= smax else (smax, smin)
+    su = (
+        load_cfg.rv30_suction_10pa_Hmin, load_cfg.rv30_suction_10pa_Lmin,
+        load_cfg.rv30_suction_10pa_Hmax, load_cfg.rv30_suction_10pa_Lmax,
+    )
+    if su != (0, 0, 0, 0):
+        slo = (su[0] << 8) | (su[2] & 0xFF)
+        shi = (su[1] << 8) | (su[3] & 0xFF)
+        if slo > shi:
+            slo, shi = shi, slo
         if not (slo <= p["suction_pa"] <= shi):
             return False
+
+
     fmin, fmax = load_cfg.rv30_freq_min, load_cfg.rv30_freq_max
     if fmin != 0 or fmax != 0:
         flo, fhi = (fmin, fmax) if fmin <= fmax else (fmax, fmin)
         if not (flo <= p["freq"] <= fhi):
             return False
+
     if load_cfg.rv30_ir_l and p["ir_l"] != load_cfg.rv30_ir_l:
         return False
     if load_cfg.rv30_ir_lc and p["ir_lc"] != load_cfg.rv30_ir_lc:
@@ -774,6 +809,7 @@ def rv30_proto_yaml_realtime_ok(p):
         return False
     if load_cfg.rv30_ir_r and p["ir_r"] != load_cfg.rv30_ir_r:
         return False
+
     if load_cfg.rv30_dust_bag_expected and p["dust"] != load_cfg.rv30_dust_bag_expected:
         return False
     if load_cfg.rv30_led_expected and p["led"] != load_cfg.rv30_led_expected:
@@ -786,8 +822,10 @@ def rv30_proto_add_fx_reports():
     mes_run.add_report(name="mcu软件版本", result=ver_res, value=dev_ver, val_max=load_cfg.mcu_ver, val_min=load_cfg.mcu_ver)
     mes_run.add_report(name="充电电流", result="", value=str(charge_value))
     mes_run.add_report(name="左回充码", result="", value=str(ir_code_left))
+    # #[RV30-PROTO-77-MOD] 四路红外与 0x77 下标 1~4 对齐
+    mes_run.add_report(name="左中回充码", result="", value=str(ir_code_lc))
+    mes_run.add_report(name="右中回充码", result="", value=str(ir_code_rc))
     mes_run.add_report(name="右回充码", result="", value=str(ir_code_right))
-    mes_run.add_report(name="近卫回充码", result="", value=str(ir_code_guard))
     mes_run.add_report(name="尘袋在位", result="", value=str(dust_bug_install))
     mes_run.add_report(name="集尘吸力Pa", result="", value=str(dust_collection_suction))
 
@@ -2462,8 +2500,9 @@ def over_air_mode(dev, cmd, dat):
 charge_value = 0
 hot_air = 0
 ir_code_left = 0
+ir_code_lc = 0  # #[RV30-PROTO-77-MOD] 左中红外码
 ir_code_right = 0
-ir_code_guard = 0
+ir_code_rc = 0  # #[RV30-PROTO-77-MOD] 右中红外码（变量名保留）
 clear_tank_install = 0
 duty_tank_install = 0
 dust_bug_install = 0
@@ -2487,7 +2526,7 @@ def hw1_bastation_finished_product_mode(dev, cmd, dat):
     global hot_air 
     global ir_code_left 
     global ir_code_right 
-    global ir_code_guard 
+    global ir_code_rc 
     global clear_tank_install 
     global duty_tank_install 
     global dust_bug_install 
@@ -2553,7 +2592,7 @@ def hw1_bastation_finished_product_mode(dev, cmd, dat):
         hot_air = int(dat[3])<<8|int(dat[4])
         ir_code_left = int(dat[5])
         ir_code_right = int(dat[6])
-        ir_code_guard = int(dat[7])
+        ir_code_rc = int(dat[7])
         clear_tank_install = int(dat[8])
         duty_tank_install = int(dat[9])
         dust_bug_install = int(dat[10])
@@ -2668,7 +2707,7 @@ def hw1_bastation_finished_product_mode(dev, cmd, dat):
                     )
         mes_run.add_report(name="近卫回充码",
                            result="NG",
-                           value= str(ir_code_guard),
+                           value= str(ir_code_rc),
                            )
         mes_run.add_report(name="清水箱在位",
                            result="NG",
@@ -2730,7 +2769,7 @@ def hw1_bastation_finished_product_mode(dev, cmd, dat):
 
 
 # #[RV30-PROTO] RV30 基站成品(device_type=50)：0x66 不发 0x67；门闸 0x57/0x58；0x77 无应答；异常 0x89 0x03；0x88 综合判定 MES
-def hw1_bastation_finished_product_mode_FX(dev, cmd, dat):
+def RV30_finished_product_mode(dev, cmd, dat):
     # #[RV30-PROTO] 调优入口：本函数 + rv30_proto_* + config.yaml rv30_* 键
     global test_start_time
     global test_end_time
@@ -2739,8 +2778,9 @@ def hw1_bastation_finished_product_mode_FX(dev, cmd, dat):
     global dev_ver
     global charge_value
     global ir_code_left
+    global ir_code_lc
     global ir_code_right
-    global ir_code_guard
+    global ir_code_rc
     global dust_bug_install
     global dust_collection_suction
     global rv30_session_state
@@ -2765,26 +2805,28 @@ def hw1_bastation_finished_product_mode_FX(dev, cmd, dat):
             print("RV30 扫描枪扫描二维码")
             wx.CallAfter(MainFrame.main_frame.reset_ui)
             wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请扫码")
-        elif dat[0] == 0x01:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
-        elif dat[0] == 0x02:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
-        elif dat[0] == 0x52:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请拔出尘袋")
-        elif dat[0] == 0x51:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请插入尘袋")
-        elif dat[0] == 0x05:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请观察灯效是否正常")
-        else:
-            wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="继续测试")
-    elif cmd == 0x68:
-        # #[RV30-PROTO] 阈值上传：草稿解析写入 dust_th，长度与下标见规格 §8 / 通讯协议.png
-        print("RV30 阈值上传 len=" + str(len(dat)) + " dat=" + str(dat))
-        rv30_proto_parse_68_dat(dat)
-        wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="已收到阈值上传", color=wx.RED)
+    #     elif dat[0] == 0x01:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
+    #     elif dat[0] == 0x02:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="开始测试")
+    #     elif dat[0] == 0x52:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请拔出尘袋")
+    #     elif dat[0] == 0x51:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请插入尘袋")
+    #     elif dat[0] == 0x05:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="请观察灯效是否正常")
+    #     else:
+    #         wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="继续测试")
+    # elif cmd == 0x68:
+    #     # #[RV30-PROTO] 阈值上传：草稿解析写入 dust_th，长度与下标见规格 §8 / 通讯协议.png
+    #     print("RV30 阈值上传 len=" + str(len(dat)) + " dat=" + str(dat))
+    #     rv30_proto_parse_68_dat(dat)
+    #     wx.CallAfter(MainFrame.main_frame.up_notification_ui, second="已收到阈值上传", color=wx.RED)
     elif cmd == 0x77:
-        # #[RV30-PROTO] 实时数据：不向治具回任何帧；与 config.yaml rv30_* 比对
-        print("RV30 实时数据:" + str(dat))
+        # #[RV30-PROTO-77-MOD] 实时数据：数据区 15 字节；不向治具回帧；与 config.yaml rv30_* 比对
+        print("RV30 实时数据 len=" + str(len(dat)) + " dat=" + str(dat))
+        if len(dat) != 15:
+            print("[RV30-PROTO-77-MOD] 期望数据区 15 字节，实际:", len(dat))
         if rv30_session_state != RV30_SESS_RUNNING or rv30_89_mes_done:
             return
         p = rv30_proto_parse_77_apply_globals(dat)
@@ -2798,9 +2840,9 @@ def hw1_bastation_finished_product_mode_FX(dev, cmd, dat):
             if not rv30_proto_yaml_realtime_ok(p):
                 rv30_proto_realtime_fail(dev, "yaml阈值:" + str(p))
                 return
-            if ver_res != "OK":
-                rv30_proto_realtime_fail(dev, "版本不匹配:" + str(dev_ver))
-                return
+            # if ver_res != "OK":
+            #     rv30_proto_realtime_fail(dev, "版本不匹配:" + str(dev_ver))
+            #     return
     elif cmd == 0x88:
         # #[RV30-PROTO] 结束帧：不向治具发 0x89 应答；综合判定见 rv30_proto_finalize_88
         print("RV30 测试结束帧 dat[0]=" + str(dat[0] if dat else None))

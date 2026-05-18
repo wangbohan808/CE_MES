@@ -63,7 +63,8 @@ hw1_basestation_produst_item_result = [
     {"hot_air": ["热风：", "", "white"]},
     {"ir_code_left": ["左回充码：", "", "white"]},
     {"ir_code_right": ["右回充码：", "", "white"]},
-    {"ir_code_guard": ["近卫回充码：", "", "white"]},
+    {"ir_code_rc": ["右中回充码：", "", "white"]},  # #[RV30-PROTO-77-MOD]
+    {"ir_code_lc": ["左中回充码：", "", "white"]},  # #[RV30-PROTO-77-MOD]
     {"clear_tank_install": ["清水箱在位：", "", "white"]},
     {"duty_tank_install": ["污水箱在位：", "", "white"]},
     {"dust_bug_install": ["尘袋在位：", "", "white"]},

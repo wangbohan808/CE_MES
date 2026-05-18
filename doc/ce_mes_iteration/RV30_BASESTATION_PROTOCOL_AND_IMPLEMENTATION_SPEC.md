@@ -17,7 +17,7 @@
 | 带数据发送            | `ser_send_data(dev, cmd, data)`，`data` 为 `int` 列表                                                               |
 | 短帧发送             | `ser_send_cmd(dev, cmd)`                                                                                        |
 | 运行配置             | `config.yaml`，`load_config()` → `load_cfg`                                                                      |
-| 当前 FX 治具逻辑       | `hw1_bastation_finished_product_mode_FX`（`dev == 50`），需按本规格重写                                                   |
+| 当前 FX 治具逻辑       | `RV30_finished_product_mode`（`dev == 50`），需按本规格重写                                                   |
 
 
 ---
@@ -172,7 +172,7 @@
   - `rv30_proto_tx_dev_byte()`：`device_type=050` **时默认回发设备字节** `0x50`**（十进制 80）**，与常见「协议表里写 50 实为 0x50」一致；若你现场是十进制 **50（0x32）**，在此函数里改回 `return int(load_cfg.dev)` 即可。
 - `test_cmd_handle`：`# #[RV30-PROTO]` 放宽匹配——配置为 `50` 时，帧内设备字节 `50` **或** `0x50` 都视为本治具。
 - `barcode_check_process`：`dev==50` 独立分支：门闸失败 `0x58` **→** `0x89`**+`**0x03` → `rv30_proto_abort_mes_after_gate_fail()`（立即 MES NG）；成功则 `0x57` 并置 `RUNNING`；发送设备字节用 `rv30_proto_tx_dev_byte()`。
-- `hw1_bastation_finished_product_mode_FX`：按规格重写——`0x66` **不发** `0x67`；`0x68` 走 `rv30_proto_parse_68_dat`（草稿下标）；`0x77` **不回帧**，解析后与 `rv30_proto_yaml_realtime_ok` 比对，失败则 `rv30_proto_realtime_fail`；`0x88` 走 `rv30_proto_finalize_88`（综合 `0x03` / `ver_res` / `rv30_realtime_ng`，**不再**对 `0x88` 回 `0x89`）。
+- `RV30_finished_product_mode`：按规格重写——`0x66` **不发** `0x67`；`0x68` 走 `rv30_proto_parse_68_dat`（草稿下标）；`0x77` **不回帧**，解析后与 `rv30_proto_yaml_realtime_ok` 比对，失败则 `rv30_proto_realtime_fail`；`0x88` 走 `rv30_proto_finalize_88`（综合 `0x03` / `ver_res` / `rv30_realtime_ng`，**不再**对 `0x88` 回 `0x89`）。
 
 ### **4. 语法检查**
 

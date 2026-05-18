@@ -37,14 +37,18 @@
 # debug_sn: Testsn001 mes调试用sn码；量产，此sn为空 " "
 # test_tool: 指测试工具名称和编码(自定义)
 
-mcu_version: 002.001.002
+
 device_type: "050"
 
 # #[RV30-PROTO] 基站050 实时判据：全为 0 表示该项不参与比较（调优见 test.py rv30_proto_yaml_realtime_ok）
-rv30_charge_min: 0
-rv30_charge_max: 0
-rv30_suction_pa_min: 0
-rv30_suction_pa_max: 0
+rv30_charge_Hmin: 0
+rv30_charge_Lmin: 0
+rv30_charge_Hmax: 0
+rv30_charge_Lmax: 0
+rv30_suction_10pa_Hmin: 0
+rv30_suction_10pa_Lmin: 0
+rv30_suction_10pa_Hmax: 0
+rv30_suction_10pa_Lmax: 0
 rv30_freq_min: 0
 rv30_freq_max: 0
 rv30_ir_l: 0
@@ -53,13 +57,15 @@ rv30_ir_rc: 0
 rv30_ir_r: 0
 rv30_dust_bag_expected: 0
 rv30_led_expected: 0
+mcu_version: 002.001.002
+
 
 use_mes: "2"
 # 指定串口，当字符为空(user_com: "")，自动获取当前串口（需唯一）  COMx
 user_com: ""
 # 配件纸盒SN头，仅适用于，103,配件纸盒条码检测工具,固定7位
 parts_sn_head: "2242G06"
-project_name: "HW1"
+project_name: "RV30"
 #parts_sn_head: ""
 
 # [WEIGH-106] 称重工位 device_type: "106" 时可选（默认见 test.LoadCfg）：
